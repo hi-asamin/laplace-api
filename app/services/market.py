@@ -739,12 +739,27 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
             "60m": "60m", "1D": "1d", "1W": "1wk", "1M": "1mo"
         }
         
+        # 1Dを選択した場合は、より詳細なデータを取得するために分単位のインターバルを使用
+        if period == "1D":
+            # インターバルがデフォルト（1D）または日以上の場合、5分間隔に変更
+            if interval in ["1D", "1W", "1M"]:
+                interval = "5m"
+        
         yf_period = period_mapping.get(period, "3mo")
         yf_interval = interval_mapping.get(interval, "1d")
         
         # データ取得
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=yf_period, interval=yf_interval)
+        
+        # データが空または少ない場合の対応
+        if len(data) <= 1 and period == "1D":
+            # 1Dでデータが少ない場合は、2日分のデータを取得して最新日のみフィルタリング
+            fallback_data = ticker.history(period="2d", interval="5m")
+            # 最新の取引日のデータのみをフィルタリング
+            if not fallback_data.empty:
+                latest_date = fallback_data.index.date.max()
+                data = fallback_data[fallback_data.index.date == latest_date]
         
         # データ整形
         chart_data = []
