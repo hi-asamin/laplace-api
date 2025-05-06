@@ -1,0 +1,41 @@
+Symbol,Name,Market,EnglishName,Industry
+AAPL,Apple Inc.,US,Apple Inc.,Technology
+MSFT,Microsoft Corporation,US,Microsoft Corp.,Technology
+GOOGL,Alphabet Inc. (Google),US,Alphabet Inc.,Communication Services
+AMZN,Amazon.com Inc.,US,Amazon.com Inc.,Consumer Discretionary
+META,Meta Platforms Inc. (Facebook),US,Meta Platforms Inc.,Communication Services
+TSLA,Tesla Inc.,US,Tesla Inc.,Technology
+NVDA,NVIDIA Corporation,US,NVIDIA Corporation,Technology
+NFLX,Netflix Inc.,US,Netflix Inc.,Technology
+SNAP,Snap Inc. (Snapchat),US,Snap Inc.,Technology
+SPOT,Spotify Technology S.A.,US,Spotify Technology S.A.,Technology
+7203.T,トヨタ自動車,Japan,Toyota Motor Corporation,Technology
+9984.T,ソフトバンクグループ,Japan,SoftBank Group Corp.,Technology
+6758.T,ソニーグループ,Japan,Sony Group Corporation,Technology
+6861.T,キーエンス,Japan,Keyence Corporation,Technology
+6098.T,リクルートホールディングス,Japan,"Recruit Holdings Co., Ltd.",Technology
+9433.T,KDDI,Japan,KDDI Corporation,Technology
+8306.T,三菱UFJフィナンシャル・グループ,Japan,"Mitsubishi UFJ Financial Group, Inc.",Technology
+6367.T,ダイキン工業,Japan,"Daikin Industries, Ltd.",Technology
+9432.T,日本電信電話,Japan,Nippon Telegraph and Telephone Corporation,Technology
+8035.T,東京エレクトロン,Japan,Tokyo Electron Limited,Technology
+6501.T,日立製作所,Japan,"Hitachi, Ltd.",Technology
+7751.T,キヤノン,Japan,Canon Inc.,Technology
+7267.T,ホンダ,Japan,"Honda Motor Co., Ltd.",Technology
+9201.T,日本航空,Japan,"Japan Airlines Co., Ltd.",Technology
+9202.T,ANAホールディングス,Japan,ANA Holdings Inc.,Technology
+9020.T,東日本旅客鉄道,Japan,East Japan Railway Company,Technology
+9022.T,東海旅客鉄道,Japan,Central Japan Railway Company,Technology
+3382.T,セブン＆アイ・ホールディングス,Japan,"Seven & i Holdings Co., Ltd.",Technology
+8267.T,イオン,Japan,"AEON Co., Ltd.",Technology
+9983.T,ファーストリテイリング,Japan,"Fast Retailing Co., Ltd.",Technology
+2914.T,日本たばこ産業,Japan,Japan Tobacco Inc.,Technology
+4519.T,中外製薬,Japan,"Chugai Pharmaceutical Co., Ltd.",Technology
+4502.T,武田薬品工業,Japan,Takeda Pharmaceutical Company Limited,Technology
+8058.T,三菱商事,Japan,Mitsubishi Corporation,Technology
+8031.T,三井物産,Japan,"Mitsui & Co., Ltd.",Technology
+BRK.B,Berkshire Hathaway Inc.,Financials,,
+JNJ,Johnson & Johnson,Health Care,,
+V,Visa Inc.,Financials,,
+PG,Procter & Gamble Co.,Consumer Staples,,
+JPM,JPMorgan Chase & Co.,Financials,,

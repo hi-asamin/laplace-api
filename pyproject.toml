@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "stock_api"
+version = "0.1.0"
+description = "Stock Analysis API"
+authors = ["You <you@example.com>"]
+readme = "README.md"
+packages = [{ include = "app" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.111.0"
+uvicorn = {extras = ["standard"], version = "^0.29.0"}
+numpy = "^1.26.4"
+pandas = "^2.2.2"
+yfinance = "^0.2.38"
+rapidfuzz = "^3.9.0"
+pydantic = "^2.6.4"
+pyhumps = "^3.8.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+httpx = {extras = ["client"], version = "^0.27.0"}
+pytest-asyncio = "^0.23.5"
