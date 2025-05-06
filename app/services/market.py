@@ -797,18 +797,47 @@ def get_fundamental_data(symbol: str):
         ticker = yf.Ticker(symbol)
         info = ticker.info
         
-        # 四半期業績のモックデータ（実際のAPIでは過去の決算データを取得）
+        # 現在の年度を基準に四半期業績データを生成
+        from datetime import datetime
+        current_year = datetime.now().year
+        current_quarter = (datetime.now().month - 1) // 3 + 1 # 現在の四半期（1〜4）
+        
+        # 四半期業績のモックデータ
         # Yahoo Financeでは完全な四半期データが取得できない場合があるため、
         # 実際の本番環境では他の財務データプロバイダーの利用を検討
         quarterly_earnings = []
         for i in range(4):
-            quarter_name = f"2023 Q{4-i}"
+            # 過去4四半期のデータを生成
+            offset_quarter = i
+            q_num = current_quarter - offset_quarter
+            year = current_year
+            
+            # 前年度の四半期を調整
+            if q_num <= 0:
+                q_num += 4
+                year -= 1
+                
+            quarter_name = f"{year} Q{q_num}"
             value = f"${round(2 + random.uniform(-0.5, 0.5), 2)}"
             prev_value = f"${round(1.8 + random.uniform(-0.3, 0.3), 2)}"
             growth = round(random.uniform(5, 15), 1)
             
-            # 3ヶ月おきの日付を生成
-            report_date = date(2023, 12, 15) - timedelta(days=90*i)
+            # 四半期末の日付を概算（実際は企業によって異なる）
+            quarter_end_month = q_num * 3
+            # 会社の決算発表は通常、四半期末から30〜45日後
+            report_offset = 45
+            quarter_end_day = 31 if quarter_end_month in [3, 12] else 30
+            
+            # 決算発表日（四半期末から約45日後）
+            if quarter_end_month + (report_offset // 30) > 12:
+                report_month = (quarter_end_month + (report_offset // 30)) % 12
+                report_year = year + 1 if quarter_end_month == 12 else year
+            else:
+                report_month = quarter_end_month + (report_offset // 30)
+                report_year = year
+                
+            report_day = min(quarter_end_day, 28 if report_month == 2 else 30)
+            report_date = date(report_year, report_month, report_day)
             
             quarterly_earnings.append({
                 "quarter": quarter_name,
