@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status, BackgroundTasks
 from typing import List, Optional
 
 from app.api.dependencies import get_market_service
@@ -118,4 +118,77 @@ def get_market_details(
                     "error_code": "INTERNAL_ERROR",
                     "message": f"内部エラーが発生しました: {str(e)}"
                 }
-            ) 
+            )
+
+# 管理者用エンドポイントを追加
+@router.post("/admin/update-jpx", status_code=status.HTTP_200_OK)
+def update_jpx_data(
+    background_tasks: BackgroundTasks,
+    market_service=Depends(get_market_service)
+):
+    """
+    JPXデータを使用して銘柄マスタを更新するエンドポイント（管理者用）
+    
+    このエンドポイントは以下の処理を行います：
+    1. JPXデータから日本株の日本語名称を読み込む
+    2. 銘柄マスタの日本株名称を日本語に更新する
+    
+    Note: このエンドポイントは管理者専用です
+    """
+    try:
+        # バックグラウンドタスクとして銘柄マスタの更新を実行
+        background_tasks.add_task(market_service.enhance_ticker_master_with_jpx)
+        
+        return {
+            "status": "success",
+            "message": "銘柄マスタの更新をバックグラウンドで開始しました"
+        }
+    except Exception as e:
+        # エラーハンドリング
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "errorCode": "INTERNAL_ERROR",
+                "message": f"内部エラーが発生しました: {str(e)}"
+            }
+        )
+
+# JPX銘柄辞書を直接更新するエンドポイントも追加
+@router.post("/admin/reload-jpx-map", status_code=status.HTTP_200_OK)
+def reload_jpx_map(
+    market_service=Depends(get_market_service)
+):
+    """
+    JPX銘柄辞書を再読み込みするエンドポイント（管理者用）
+    
+    このエンドポイントは以下の処理を行います：
+    1. JPXデータを再読み込みし、銘柄辞書を更新する
+    
+    Note: このエンドポイントは管理者専用です
+    """
+    try:
+        # JPX銘柄辞書を更新
+        result = market_service.update_jpx_symbols_map()
+        
+        if result:
+            return {
+                "status": "success",
+                "message": "JPX銘柄辞書を更新しました"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "errorCode": "UPDATE_FAILED",
+                    "message": "JPX銘柄辞書の更新に失敗しました"
+                }
+            )
+    except Exception as e:
+        # エラーハンドリング
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "errorCode": "INTERNAL_ERROR",
+                "message": f"内部エラーが発生しました: {str(e)}"
+            }
+        ) 

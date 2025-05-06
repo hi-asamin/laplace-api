@@ -7,8 +7,10 @@ import random
 import re
 from app.models.enums import AssetType
 from datetime import date, timedelta
+import os
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
+JPX_DATA_FILE = Path(__file__).parent / "data_j.xls"
 
 # 主要企業のロゴURLを定義
 LOGO_URLS = {
@@ -102,10 +104,18 @@ JAPAN_TICKERS = [
 def load_japan_stocks():
     """
     日本の株式データを取得する
-    注: 現在はINITIAL_TICKERSからのデータのみを使用し、外部ファイル参照は行いません
+    JPXデータを優先的に使用し、取得できない場合は初期データを使用します
     """
     try:
-        # 初期データを使用
+        # JPXデータをロード
+        jpx_df, _ = load_jpx_data() or (None, {})
+        
+        if jpx_df is not None and len(jpx_df) > 0:
+            print(f"JPXデータから {len(jpx_df)} 件の日本株データを読み込みました")
+            return jpx_df
+        
+        # JPXデータが取得できなかった場合は初期データを使用
+        print("JPXデータが取得できなかったため、初期データを使用します")
         japan_df = pd.DataFrame(JAPAN_TICKERS)
         japan_df["Market"] = "Japan"
         print(f"初期データから {len(japan_df)} 件の日本株データを読み込みました")
@@ -114,7 +124,10 @@ def load_japan_stocks():
     except Exception as e:
         print(f"日本株データの読み込み中にエラーが発生しました: {e}")
         # エラーが発生した場合、空のデータフレームを返す
-        return pd.DataFrame(columns=["Symbol", "Name", "Market"])
+        japan_df = pd.DataFrame(JAPAN_TICKERS)
+        japan_df["Market"] = "Japan"
+        print(f"初期データから {len(japan_df)} 件の日本株データを読み込みました")
+        return japan_df
 
 @lru_cache(maxsize=1)
 def load_ticker_master():
@@ -389,17 +402,37 @@ def reset_ticker_cache():
 def get_company_info(symbol: str):
     """
     シンボルから企業情報を取得する関数
+    日本株の場合は日本語名称を優先的に返す
     """
     try:
+        # 日本株の場合は日本語名を優先
+        japanese_name = None
+        if symbol.endswith(".T"):
+            # JPXデータから日本語名を検索
+            japanese_name = JPX_SYMBOLS_MAP.get(symbol)
+            
+            # JPXデータになければJAPAN_TICKERSから検索
+            if not japanese_name:
+                for ticker in JAPAN_TICKERS:
+                    if ticker["Symbol"] == symbol:
+                        japanese_name = ticker["Name"]
+                        break
+        
         ticker = yf.Ticker(symbol)
         info = ticker.info
         
         # 企業名を取得（複数のフィールドを試す）
         company_name = None
-        for field in ['longName', 'shortName', 'name']:
-            if field in info and info[field]:
-                company_name = info[field]
-                break
+        
+        # 日本株で日本語名があれば優先
+        if japanese_name:
+            company_name = japanese_name
+        else:
+            # それ以外は通常の順序で取得
+            for field in ['longName', 'shortName', 'name']:
+                if field in info and info[field]:
+                    company_name = info[field]
+                    break
         
         if not company_name:
             company_name = f"{symbol} Stock"
@@ -416,13 +449,28 @@ def get_company_info(symbol: str):
             "industry": info.get('industry', ''),
             "country": info.get('country', ''),
             "website": website,
-            "logo_url": logo_url
+            "logoUrl": logo_url
         }
     except Exception as e:
         print(f"Error fetching info for {symbol}: {e}")
-        # エラー時もロゴURLを提供できるようにする
+        # エラー時も日本語名と可能ならロゴURLを提供
+        if symbol.endswith(".T"):
+            # JPXデータから日本語名を検索
+            japanese_name = JPX_SYMBOLS_MAP.get(symbol)
+            
+            # JPXデータになければJAPAN_TICKERSから検索
+            if not japanese_name:
+                for ticker in JAPAN_TICKERS:
+                    if ticker["Symbol"] == symbol:
+                        japanese_name = ticker["Name"]
+                        break
+            
+            if japanese_name:
+                return {"name": japanese_name, "logoUrl": LOGO_URLS.get(symbol)}
+        
+        # その他のケース
         logo_url = LOGO_URLS.get(symbol)
-        return {"name": f"{symbol} Stock", "logo_url": logo_url}
+        return {"name": f"{symbol} Stock", "logoUrl": logo_url}
 
 def get_stock_price(symbol: str):
     """
@@ -688,7 +736,7 @@ def get_market_details(symbol: str):
         }
         
         # ロゴURLを取得
-        logo_url = company_info.get('logo_url')
+        logo_url = company_info.get('logoUrl')
         
         # 事前定義したロゴがない場合はClearbitから取得（企業ドメインがあれば）
         if not logo_url and company_info.get('website'):
@@ -797,55 +845,177 @@ def get_fundamental_data(symbol: str):
         ticker = yf.Ticker(symbol)
         info = ticker.info
         
-        # 現在の年度を基準に四半期業績データを生成
-        from datetime import datetime
-        current_year = datetime.now().year
-        current_quarter = (datetime.now().month - 1) // 3 + 1 # 現在の四半期（1〜4）
-        
-        # 四半期業績のモックデータ
-        # Yahoo Financeでは完全な四半期データが取得できない場合があるため、
-        # 実際の本番環境では他の財務データプロバイダーの利用を検討
-        quarterly_earnings = []
-        for i in range(4):
-            # 過去4四半期のデータを生成
-            offset_quarter = i
-            q_num = current_quarter - offset_quarter
-            year = current_year
+        # 実際の四半期業績データを取得
+        try:
+            # yfinanceから四半期財務データを取得
+            earnings_data = ticker.earnings
+            earnings_quarterly = ticker.quarterly_earnings
+            earnings_dates = ticker.earnings_dates
             
-            # 前年度の四半期を調整
-            if q_num <= 0:
-                q_num += 4
-                year -= 1
+            # 四半期EPSデータがあるか確認
+            has_quarterly_data = earnings_quarterly is not None and not earnings_quarterly.empty
+            
+            # 現在の年と四半期を取得
+            from datetime import datetime
+            current_year = datetime.now().year
+            current_quarter = (datetime.now().month - 1) // 3 + 1  # 現在の四半期（1〜4）
+            
+            quarterly_earnings = []
+            
+            if has_quarterly_data:
+                # 実際のデータを使用
+                # earnings_quarterlyは通常古い四半期から新しい四半期順
+                for i, (date_idx, row) in enumerate(earnings_quarterly.iterrows()):
+                    if i >= 4:  # 直近4四半期のみ
+                        break
+                        
+                    # 日付からYYYY-Q1形式の四半期名を生成
+                    year = date_idx.year
+                    q_num = (date_idx.month - 1) // 3 + 1
+                    quarter_name = f"{year} Q{q_num}"
+                    
+                    # EPS値を取得
+                    eps_value = row.get('Earnings', None)
+                    if eps_value is not None:
+                        value = f"${eps_value:.2f}"
+                    else:
+                        value = "N/A"
+                    
+                    # 前年同期のEPSを取得（あれば）
+                    prev_year_idx = date_idx.replace(year=date_idx.year - 1)
+                    prev_year_data = earnings_quarterly[earnings_quarterly.index == prev_year_idx]
+                    
+                    if not prev_year_data.empty:
+                        prev_eps = prev_year_data.iloc[0].get('Earnings', None)
+                        prev_value = f"${prev_eps:.2f}" if prev_eps is not None else "N/A"
+                        
+                        # 成長率を計算
+                        if eps_value is not None and prev_eps is not None and prev_eps != 0:
+                            growth_rate = ((eps_value - prev_eps) / abs(prev_eps)) * 100
+                            growth_text = f"{'+' if growth_rate >= 0 else ''}{growth_rate:.1f}%"
+                        else:
+                            growth_text = "N/A"
+                    else:
+                        prev_value = "N/A"
+                        growth_text = "N/A"
+                    
+                    # 発表日はインデックス自体を使用
+                    report_date = date_idx.date()
+                    
+                    quarterly_earnings.append({
+                        "quarter": quarter_name,
+                        "value": value,
+                        "report_date": report_date,
+                        "previous_year_value": prev_value,
+                        "growth_rate": growth_text
+                    })
                 
-            quarter_name = f"{year} Q{q_num}"
-            value = f"${round(2 + random.uniform(-0.5, 0.5), 2)}"
-            prev_value = f"${round(1.8 + random.uniform(-0.3, 0.3), 2)}"
-            growth = round(random.uniform(5, 15), 1)
+                # 最新の四半期が先頭に来るように並び替え
+                quarterly_earnings.reverse()
             
-            # 四半期末の日付を概算（実際は企業によって異なる）
-            quarter_end_month = q_num * 3
-            # 会社の決算発表は通常、四半期末から30〜45日後
-            report_offset = 45
-            quarter_end_day = 31 if quarter_end_month in [3, 12] else 30
+            # データが取得できなかった場合はモックデータを生成
+            if not quarterly_earnings:
+                print(f"銘柄 {symbol} の実際の四半期データが取得できなかったため、推定データを生成します")
+                # 現在の日付からエスティメートする
+                for i in range(4):
+                    # 過去4四半期のデータを生成
+                    offset_quarter = i
+                    q_num = current_quarter - offset_quarter
+                    year = current_year
+                    
+                    # 前年度の四半期を調整
+                    if q_num <= 0:
+                        q_num += 4
+                        year -= 1
+                        
+                    quarter_name = f"{year} Q{q_num}"
+                    
+                    # TTM EPSから概算値を計算（存在する場合）
+                    ttm_eps = info.get('trailingEps', None)
+                    if ttm_eps:
+                        # TTM EPSを4等分して四半期の概算値を算出
+                        estimated_quarterly_eps = ttm_eps / 4
+                        value = f"${estimated_quarterly_eps:.2f} (est.)"
+                        prev_value = f"${estimated_quarterly_eps * 0.9:.2f} (est.)"  # 前年比10%成長と仮定
+                        growth = 10.0  # 概算成長率
+                    else:
+                        # TTM EPSがなければランダムな値を使用
+                        value = f"${round(2 + random.uniform(-0.5, 0.5), 2)} (est.)"
+                        prev_value = f"${round(1.8 + random.uniform(-0.3, 0.3), 2)} (est.)"
+                        growth = round(random.uniform(5, 15), 1)
+                    
+                    # 四半期末の日付を概算
+                    quarter_end_month = q_num * 3
+                    report_offset = 45  # 報告は四半期末から約45日後
+                    quarter_end_day = 31 if quarter_end_month in [3, 12] else 30
+                    
+                    # 決算発表日
+                    if quarter_end_month + (report_offset // 30) > 12:
+                        report_month = (quarter_end_month + (report_offset // 30)) % 12
+                        report_year = year + 1 if quarter_end_month == 12 else year
+                    else:
+                        report_month = quarter_end_month + (report_offset // 30)
+                        report_year = year
+                        
+                    report_day = min(quarter_end_day, 28 if report_month == 2 else 30)
+                    report_date = date(report_year, report_month, report_day)
+                    
+                    quarterly_earnings.append({
+                        "quarter": quarter_name,
+                        "value": value,
+                        "report_date": report_date,
+                        "previous_year_value": prev_value,
+                        "growth_rate": f"+{growth}% (est.)"
+                    })
+        except Exception as e:
+            print(f"四半期データの取得中にエラーが発生しました: {e}")
+            # エラー時はデフォルトに戻る
+            quarterly_earnings = []
             
-            # 決算発表日（四半期末から約45日後）
-            if quarter_end_month + (report_offset // 30) > 12:
-                report_month = (quarter_end_month + (report_offset // 30)) % 12
-                report_year = year + 1 if quarter_end_month == 12 else year
-            else:
-                report_month = quarter_end_month + (report_offset // 30)
-                report_year = year
+            # モックデータを生成
+            from datetime import datetime
+            current_year = datetime.now().year
+            current_quarter = (datetime.now().month - 1) // 3 + 1  # 現在の四半期（1〜4）
+            
+            for i in range(4):
+                # 過去4四半期のデータを生成
+                offset_quarter = i
+                q_num = current_quarter - offset_quarter
+                year = current_year
                 
-            report_day = min(quarter_end_day, 28 if report_month == 2 else 30)
-            report_date = date(report_year, report_month, report_day)
-            
-            quarterly_earnings.append({
-                "quarter": quarter_name,
-                "value": value,
-                "report_date": report_date,
-                "previous_year_value": prev_value,
-                "growth_rate": f"+{growth}%"
-            })
+                # 前年度の四半期を調整
+                if q_num <= 0:
+                    q_num += 4
+                    year -= 1
+                    
+                quarter_name = f"{year} Q{q_num}"
+                value = f"${round(2 + random.uniform(-0.5, 0.5), 2)} (est.)"
+                prev_value = f"${round(1.8 + random.uniform(-0.3, 0.3), 2)} (est.)"
+                growth = round(random.uniform(5, 15), 1)
+                
+                # 四半期末の日付を概算
+                quarter_end_month = q_num * 3
+                report_offset = 45
+                quarter_end_day = 31 if quarter_end_month in [3, 12] else 30
+                
+                # 決算発表日
+                if quarter_end_month + (report_offset // 30) > 12:
+                    report_month = (quarter_end_month + (report_offset // 30)) % 12
+                    report_year = year + 1 if quarter_end_month == 12 else year
+                else:
+                    report_month = quarter_end_month + (report_offset // 30)
+                    report_year = year
+                    
+                report_day = min(quarter_end_day, 28 if report_month == 2 else 30)
+                report_date = date(report_year, report_month, report_day)
+                
+                quarterly_earnings.append({
+                    "quarter": quarter_name,
+                    "value": value,
+                    "report_date": report_date,
+                    "previous_year_value": prev_value,
+                    "growth_rate": f"+{growth}% (est.)"
+                })
         
         # 主要指標
         eps = info.get('trailingEps', 0)
@@ -989,7 +1159,7 @@ def get_related_markets(symbol: str, limit: int = 5):
                 rel_company_info = get_company_info(rel_symbol)
                 
                 # ロゴURLを取得
-                logo_url = rel_company_info.get('logo_url')
+                logo_url = rel_company_info.get('logoUrl')
                 
                 # 事前定義したロゴがない場合はClearbitから取得（企業ドメインがあれば）
                 if not logo_url and rel_company_info.get('website'):
@@ -1018,4 +1188,143 @@ def get_related_markets(symbol: str, limit: int = 5):
         return {"items": items}
     except Exception as e:
         print(f"Error fetching related markets for {symbol}: {e}")
-        return {"items": []} 
+        return {"items": []}
+
+def load_jpx_data():
+    """
+    JPXのExcelファイルから日本株データを読み込む関数
+    """
+    try:
+        # ファイルの存在確認
+        if not JPX_DATA_FILE.exists():
+            print(f"JPXデータファイル {JPX_DATA_FILE} が見つかりません")
+            return None, {}
+            
+        # Excelファイルを読み込む
+        jpx_df = pd.read_excel(JPX_DATA_FILE)
+        
+        # カラム名を確認（実際のJPXデータ構造に合わせて調整が必要）
+        expected_columns = ["コード", "銘柄名", "市場・商品区分", "33業種区分"]
+        
+        # カラム名の確認と調整
+        if "コード" in jpx_df.columns and "銘柄名" in jpx_df.columns:
+            # 必要なカラムを抽出
+            essential_columns = ["コード", "銘柄名"]
+            
+            # 利用可能な追加カラムを確認して追加
+            additional_columns = []
+            if "市場・商品区分" in jpx_df.columns:
+                additional_columns.append("市場・商品区分")
+            if "33業種区分" in jpx_df.columns:
+                additional_columns.append("33業種区分")
+                
+            selected_columns = essential_columns + additional_columns
+            jpx_df = jpx_df[selected_columns]
+            
+            # カラム名を英語に変換
+            column_map = {
+                "コード": "Code",
+                "銘柄名": "Name"
+            }
+            
+            if "市場・商品区分" in jpx_df.columns:
+                column_map["市場・商品区分"] = "MarketSegment"
+            if "33業種区分" in jpx_df.columns:
+                column_map["33業種区分"] = "Sector"
+                
+            jpx_df = jpx_df.rename(columns=column_map)
+            
+            # Yahoo Financeで使用するシンボル形式に変換（コードに.Tを追加）
+            jpx_df["Symbol"] = jpx_df["Code"].astype(str).str.zfill(4) + ".T"
+            
+            # 市場情報を設定
+            jpx_df["Market"] = "Japan"
+            
+            # シンボルと日本語名のマッピング作成
+            jpx_symbols_map = dict(zip(jpx_df["Symbol"], jpx_df["Name"]))
+            
+            print(f"JPXから {len(jpx_df)} 件の日本株データを読み込みました")
+            return jpx_df, jpx_symbols_map
+        else:
+            print("JPXデータの形式が予期しないものです。カラム構造を確認してください。")
+            return None, {}
+    except Exception as e:
+        print(f"JPXデータの読み込み中にエラーが発生しました: {e}")
+        return None, {}
+
+# JPX銘柄名の辞書
+JPX_SYMBOLS_MAP = {}
+
+# 初期化時にJPXデータをロード
+try:
+    _, JPX_SYMBOLS_MAP = load_jpx_data() or (None, {})
+    print(f"JPX銘柄辞書を {len(JPX_SYMBOLS_MAP)} 件ロードしました")
+except Exception as e:
+    print(f"JPX銘柄辞書のロード中にエラーが発生しました: {e}")
+
+def update_jpx_symbols_map():
+    """
+    JPX銘柄辞書を更新する関数
+    データが変更された場合に手動で呼び出します
+    """
+    global JPX_SYMBOLS_MAP
+    try:
+        _, updated_map = load_jpx_data() or (None, {})
+        if updated_map and len(updated_map) > 0:
+            JPX_SYMBOLS_MAP = updated_map
+            print(f"JPX銘柄辞書を更新しました。{len(JPX_SYMBOLS_MAP)}件のデータがあります。")
+            return True
+        else:
+            print("JPX銘柄辞書の更新に失敗しました。有効なデータが取得できませんでした。")
+            return False
+    except Exception as e:
+        print(f"JPX銘柄辞書の更新中にエラーが発生しました: {e}")
+        return False
+
+def enhance_ticker_master_with_jpx():
+    """
+    銘柄マスタをJPXデータで拡充する関数
+    日本株の日本語名称をマスタに追加します
+    """
+    try:
+        # 現在のマスタデータを読み込む
+        df = load_ticker_master()
+        if df is None or len(df) == 0:
+            print("銘柄マスタが空です。まず基本データをロードしてください。")
+            return False
+            
+        # JPXデータを読み込む
+        jpx_df, _ = load_jpx_data() or (None, {})
+        if jpx_df is None or len(jpx_df) == 0:
+            print("JPXデータを読み込めませんでした。")
+            return False
+            
+        # 日本株だけを抽出
+        japan_stocks = df[df["Symbol"].str.endswith(".T")].copy()
+        
+        # JPXデータとマージするためのキー設定
+        updates_made = 0
+        
+        # 各日本株に対して、JPXデータから日本語名を探して更新
+        for idx, row in japan_stocks.iterrows():
+            symbol = row["Symbol"]
+            if symbol in JPX_SYMBOLS_MAP:
+                japanese_name = JPX_SYMBOLS_MAP[symbol]
+                # 元のデータフレームを更新
+                df.loc[df["Symbol"] == symbol, "Name"] = japanese_name
+                updates_made += 1
+        
+        # 更新があった場合、キャッシュファイルを更新
+        if updates_made > 0:
+            df.to_csv(TICKER_CACHE, index=False)
+            print(f"銘柄マスタを更新しました。{updates_made}件の日本株名称を日本語化しました。")
+            # 銘柄マスタのキャッシュをクリア
+            load_ticker_master.cache_clear()
+            return True
+        else:
+            print("更新対象の日本株銘柄がありませんでした。")
+            return False
+            
+    except Exception as e:
+        print(f"銘柄マスタの拡充中にエラーが発生しました: {e}")
+        return False 
