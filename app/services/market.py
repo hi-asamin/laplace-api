@@ -797,7 +797,7 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
     
     Args:
         symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
-        period: データ期間 (1D, 1W, 1M, 3M, 6M, 1Y, ALL)
+        period: データ期間 (1D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, ALL)
         interval: データ間隔 (1m, 5m, 15m, 30m, 60m, 1D, 1W, 1M)
         
     Returns:
@@ -807,7 +807,9 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
         # 期間とインターバルをyfinance形式に変換
         period_mapping = {
             "1D": "1d", "1W": "5d", "1M": "1mo",
-            "3M": "3mo", "6M": "6mo", "1Y": "1y", "ALL": "max"
+            "3M": "3mo", "6M": "6mo", "1Y": "1y",
+            "2Y": "2y", "5Y": "5y", "10Y": "10y",
+            "ALL": "max"
         }
         interval_mapping = {
             "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
