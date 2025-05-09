@@ -6,7 +6,7 @@ from pathlib import Path
 import random
 import re
 from app.models.enums import AssetType
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime, timezone
 import os
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
@@ -483,12 +483,31 @@ def get_stock_price(symbol: str):
     
     try:
         ticker = yf.Ticker(symbol)
-        # 最新の価格情報を取得
-        data = ticker.history(period="1d")
+        
+        # 日本株の場合、取引時間内かどうかを判定
+        if is_japan_stock:
+            current_time = datetime.now(timezone(timedelta(hours=9)))  # JST
+            is_trading_hours = (
+                current_time.weekday() < 5 and  # 平日
+                9 <= current_time.hour < 15 or  # 9:00-15:00
+                (current_time.hour == 15 and current_time.minute <= 30)  # 15:00-15:30
+            )
+            
+            if is_trading_hours:
+                # 取引時間内は1分足のデータを取得
+                data = ticker.history(period="1d", interval="1m")
+            else:
+                # 取引時間外は日足のデータを取得
+                data = ticker.history(period="1d")
+        else:
+            # 米国株の場合は日足のデータを取得
+            data = ticker.history(period="1d")
         
         if not data.empty:
             # 最新の終値
             latest_price = data['Close'].iloc[-1]
+            # データ取得時刻（最新のデータの日時）
+            last_updated = data.index[-1]
             
             # 前日比の変化率を計算
             if len(data) > 1:
@@ -497,10 +516,14 @@ def get_stock_price(symbol: str):
             else:
                 # 1日分のデータしかない場合
                 change_percent = 0
-                
+            
+            # UTCに変換して返却
+            utc_time = last_updated.astimezone(timezone.utc)
+            
             return {
                 "price": f"{currency_symbol}{latest_price:.2f}",
-                "change_percent": f"{'+' if change_percent > 0 else ''}{change_percent:.1f}%"
+                "change_percent": f"{'+' if change_percent > 0 else ''}{change_percent:.1f}%",
+                "last_updated": utc_time.strftime("%Y-%m-%dT%H:%M:%SZ")
             }
     except Exception as e:
         print(f"Error fetching price for {symbol}: {e}")
@@ -508,10 +531,12 @@ def get_stock_price(symbol: str):
     # エラーが発生した場合や、データが取得できない場合はランダムな値を返す
     price = round(random.uniform(10, 1000), 2)
     change = round(random.uniform(-5, 5), 1)
+    current_utc = datetime.now(timezone.utc)
     
     return {
         "price": f"{currency_symbol}{price}",
-        "change_percent": f"{'+' if change > 0 else ''}{change}%"
+        "change_percent": f"{'+' if change > 0 else ''}{change}%",
+        "last_updated": current_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
     }
 
 # 銘柄マスタを修正して日本株を追加する
@@ -706,6 +731,7 @@ def get_market_details(symbol: str):
         price_data = get_stock_price(symbol)
         latest_price = price_data["price"]
         change_percent = price_data["change_percent"]
+        last_updated = price_data["last_updated"]
         
         # 前日比の数値を計算
         try:
@@ -758,7 +784,8 @@ def get_market_details(symbol: str):
             "industry": company_info.get('industry', None),
             "description": info.get('longBusinessSummary', None),
             "website": company_info.get('website', None),
-            "trading_info": trading_info
+            "trading_info": trading_info,
+            "last_updated": last_updated
         }
     except Exception as e:
         print(f"Error fetching market details for {symbol}: {e}")
