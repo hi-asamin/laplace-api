@@ -28,12 +28,44 @@ jobs:
 
       - name: Create deployment package
         run: |
+          # デプロイ用ディレクトリの作成
           mkdir -p deployment
+
+          # 必要なファイルのみをコピー
           cp -r app deployment/
+          cp lambda_function.py deployment/
           cp requirements.txt deployment/
+
+          # 不要なファイルを削除
+          find deployment -type d -name "__pycache__" -exec rm -rf {} +
+          find deployment -type d -name "tests" -exec rm -rf {} +
+          find deployment -type d -name ".pytest_cache" -exec rm -rf {} +
+          find deployment -type f -name "*.pyc" -delete
+          find deployment -type f -name "*.pyo" -delete
+          find deployment -type f -name "*.pyd" -delete
+          find deployment -type f -name "*.so" -delete
+          find deployment -type f -name "*.dylib" -delete
+
+          # 依存関係のインストール（必要なパッケージのみ）
           cd deployment
-          pip install -r requirements.txt -t .
-          zip -r ../function.zip .
+          pip install --no-cache-dir --platform manylinux2014_x86_64 --target=. --implementation cp --python-version 3.11 --only-binary=:all: --upgrade fastapi mangum pandas yfinance
+          pip install --no-cache-dir --platform manylinux2014_x86_64 --target=. --implementation cp --python-version 3.11 --only-binary=:all: --upgrade python-multipart python-jose[cryptography] passlib[bcrypt] pydantic requests
+
+          # 不要なファイルを削除
+          find . -type d -name "*.dist-info" -exec rm -rf {} +
+          find . -type d -name "*.egg-info" -exec rm -rf {} +
+          find . -type d -name "tests" -exec rm -rf {} +
+          find . -type d -name "test" -exec rm -rf {} +
+          find . -type d -name "doc" -exec rm -rf {} +
+          find . -type d -name "docs" -exec rm -rf {} +
+          find . -type f -name "*.pyc" -delete
+          find . -type f -name "*.pyo" -delete
+          find . -type f -name "*.pyd" -delete
+          find . -type f -name "*.so" -delete
+          find . -type f -name "*.dylib" -delete
+
+          # ZIPファイルの作成
+          zip -r ../function.zip . -x "*.git*" "*.DS_Store" "*.pyc" "*.pyo" "*.pyd" "*.so" "*.dylib"
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v2
