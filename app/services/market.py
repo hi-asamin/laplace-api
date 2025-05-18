@@ -10,7 +10,7 @@ from datetime import date, timedelta, datetime, timezone
 import os
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
-JPX_DATA_FILE = Path(__file__).parent / "data_j.xls"
+JPX_DATA_FILE = Path(__file__).parent / "data.csv"  # .xlsから.csvに変更
 
 # 主要企業のロゴURLを定義
 LOGO_URLS = {
@@ -237,23 +237,41 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
     # 結果格納用リスト
     results = []
     
-    # 1. シンボル完全一致
+    # 1. シンボルでの検索
     try:
-        symbol_matches = df[df['Symbol'].str.lower() == lower_query]
-        for _, row in symbol_matches.iterrows():
+        # 完全一致
+        exact_matches = df[df['Symbol'].str.lower() == lower_query]
+        for _, row in exact_matches.iterrows():
             symbol = row['Symbol']
             # ロゴURLを取得
             logo_url = LOGO_URLS.get(symbol)
             
             results.append({
                 'symbol': symbol,
-                'name': row.get('Name', ''),
+                'name': row.get('Name', row.get('EnglishName', '')),
                 'score': 100,
                 'asset_type': AssetType.STOCK,  # デフォルトは株式
                 'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
                 'logo_url': logo_url
             })
-            print(f"シンボル完全一致：{symbol} ({row.get('Name', '')})")
+            print(f"シンボル完全一致：{symbol}")
+        
+        # 部分一致
+        contains = df[df['Symbol'].str.lower().str.contains(lower_query, na=False)]
+        for _, row in contains.iterrows():
+            symbol = row['Symbol']
+            # ロゴURLを取得
+            logo_url = LOGO_URLS.get(symbol)
+            
+            results.append({
+                'symbol': symbol,
+                'name': row.get('Name', row.get('EnglishName', '')),
+                'score': 90,
+                'asset_type': AssetType.STOCK,  # デフォルトは株式
+                'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
+                'logo_url': logo_url
+            })
+            print(f"シンボル部分一致：{symbol}")
     except Exception as e:
         print(f"シンボル検索中にエラーが発生しました: {e}")
     
@@ -316,7 +334,39 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
         except Exception as e:
             print(f"{col}での検索中にエラーが発生しました: {e}")
     
-    # 3. 追加：日本語名のあいまい検索（特にJAPAN_TICKERSからのデータ確保）
+    # 3. data.csvからの検索（日本株の場合）
+    if market is None or market == "Japan":
+        try:
+            # data.csvを読み込む
+            jpx_df = pd.read_csv(JPX_DATA_FILE)
+            if jpx_df is not None and len(jpx_df) > 0:
+                # 既存の結果のシンボルを取得
+                existing_symbols = {r["symbol"] for r in results}
+                
+                # 日本語名で検索
+                japanese_matches = jpx_df[jpx_df["銘柄名"].str.contains(query, na=False)]
+                
+                # 新しい結果を追加
+                for _, row in japanese_matches.iterrows():
+                    if len(results) >= limit:
+                        break
+                        
+                    symbol = f"{row['コード']}.T"
+                    if symbol not in existing_symbols:
+                        results.append({
+                            "symbol": symbol,
+                            "name": row["銘柄名"],
+                            "score": 85,  # 通常の検索より少し低いスコア
+                            "asset_type": AssetType.STOCK,
+                            "market": "Japan",
+                            "logo_url": None
+                        })
+                        existing_symbols.add(symbol)
+                        print(f"data.csv一致：{symbol} ({row['銘柄名']})")
+        except Exception as e:
+            print(f"data.csv検索中にエラーが発生しました: {e}")
+    
+    # 4. 追加：日本語名のあいまい検索（特にJAPAN_TICKERSからのデータ確保）
     if not results and query:
         print("通常検索でヒットしないため、初期データから検索を行います")
         # 初期データから検索
@@ -341,15 +391,18 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
     # 重複を削除（シンボルベース）
     unique_results = []
     seen_symbols = set()
-    for item in results:
-        if item['symbol'] not in seen_symbols:
-            seen_symbols.add(item['symbol'])
-            unique_results.append(item)
+    for r in results:
+        if r['symbol'] not in seen_symbols:
+            unique_results.append(r)
+            seen_symbols.add(r['symbol'])
     
     # スコア順にソート
     unique_results.sort(key=lambda x: x.get('score', 0), reverse=True)
     
-    print(f"検索結果：{len(unique_results)}件")
+    # 市場でフィルタリング
+    if market:
+        unique_results = [r for r in unique_results if r['market'] == market]
+    
     return unique_results[:limit]
 
 @lru_cache(maxsize=256)
@@ -1221,7 +1274,7 @@ def get_related_markets(symbol: str, limit: int = 5):
 
 def load_jpx_data():
     """
-    JPXのExcelファイルから日本株データを読み込む関数
+    CSVファイルから日本株データを読み込む関数
     """
     try:
         # ファイルの存在確認
@@ -1229,10 +1282,10 @@ def load_jpx_data():
             print(f"JPXデータファイル {JPX_DATA_FILE} が見つかりません")
             return None, {}
             
-        # Excelファイルを読み込む
-        jpx_df = pd.read_excel(JPX_DATA_FILE)
+        # CSVファイルを読み込む
+        jpx_df = pd.read_csv(JPX_DATA_FILE)
         
-        # カラム名を確認（実際のJPXデータ構造に合わせて調整が必要）
+        # カラム名を確認
         expected_columns = ["コード", "銘柄名", "市場・商品区分", "33業種区分"]
         
         # カラム名の確認と調整
