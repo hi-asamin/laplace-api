@@ -18,12 +18,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13.3"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install mangum==0.17.0 python-multipart==0.0.9 python-jose==3.3.0 passlib==1.7.4 pydantic-core==2.16.3 typing-extensions==4.10.0 requests==2.31.0
+          pip install -r requirements.txt
 
       - name: Create deployment package
         run: |
