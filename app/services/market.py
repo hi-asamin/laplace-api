@@ -8,6 +8,13 @@ import re
 from app.models.enums import AssetType
 from datetime import date, timedelta, datetime, timezone
 import os
+from .dynamodb import (
+    save_stock_data,
+    get_stock_data,
+    update_stock_data,
+    convert_to_dataframe
+)
+from typing import List, Dict, Any
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
 JPX_DATA_FILE = Path(__file__).parent / "data.csv"  # .xlsから.csvに変更
@@ -132,60 +139,36 @@ def load_japan_stocks():
 @lru_cache(maxsize=1)
 def load_ticker_master():
     """銘柄マスターデータをロードする関数"""
-    # キャッシュファイルが存在する場合、それを読み込む
-    if TICKER_CACHE.exists():
-        df = pd.read_csv(TICKER_CACHE)
-        # キャッシュファイルが正しい形式かチェック
-        if "Symbol" in df.columns and "Name" in df.columns:
-            # 各シンボルに対して名前が正しく設定されているか確認
-            for idx, row in df.iterrows():
-                if row["Name"] == row["Symbol"] or row["Name"] == f"{row['Symbol']} Stock":
-                    # 名前がシンボルと同じ場合、yfinanceから正しい名前を取得
-                    try:
-                        info = get_company_info(row["Symbol"])
-                        if info["name"] != f"{row['Symbol']} Stock":
-                            df.at[idx, "Name"] = info["name"]
-                    except Exception as e:
-                        print(f"Error updating name for {row['Symbol']}: {e}")
-            
-            # 更新したデータをキャッシュに保存
-            df.to_csv(TICKER_CACHE, index=False)
-            return df
-        else:
-            # カラムが正しくない場合はキャッシュを削除して再生成
-            TICKER_CACHE.unlink(missing_ok=True)
+    # DynamoDBからデータを取得
+    items = get_stock_data()
     
-    # S&P 500のデータを取得（米国株）
-    try:
-        sp500 = pd.read_csv("https://raw.githubusercontent.com/datasets/s-and-p-500-companies/master/data/constituents.csv")
-        sp500["Market"] = "US"  # 市場を追加
-    except Exception as e:
-        print(f"Error fetching S&P 500 data: {e}")
-        # 初期データを使用
-        sp500 = pd.DataFrame(INITIAL_TICKERS)
-        sp500["Market"] = "US"  # 市場を追加
+    if items:
+        df = convert_to_dataframe(items)
+        # 各シンボルに対して名前が正しく設定されているか確認
+        for idx, row in df.iterrows():
+            if row["Name"] == row["Symbol"] or row["Name"] == f"{row['Symbol']} Stock":
+                # 名前がシンボルと同じ場合、yfinanceから正しい名前を取得
+                try:
+                    info = get_company_info(row["Symbol"])
+                    if info["name"] != f"{row['Symbol']} Stock":
+                        update_stock_data(row["Symbol"], {"Name": info["name"]})
+                except Exception as e:
+                    print(f"Error updating name for {row['Symbol']}: {e}")
+        return df
     
-    # 日本株データを取得
-    japan_stocks = load_japan_stocks()
+    # データが存在しない場合は初期データを保存
+    print("DynamoDBにデータが存在しないため、初期データを保存します")
+    initial_data = []
+    for ticker in INITIAL_TICKERS:
+        ticker["Market"] = "US"
+        initial_data.append(ticker)
     
-    # 米国株と日本株を結合
-    combined_df = pd.concat([sp500, japan_stocks], ignore_index=True)
+    for ticker in JAPAN_TICKERS:
+        ticker["Market"] = "Japan"
+        initial_data.append(ticker)
     
-    # データの整合性を確認
-    for idx, row in combined_df.iterrows():
-        if row["Name"] == row["Symbol"] or pd.isna(row["Name"]) or row["Name"] == "":
-            # 名前が設定されていない場合、yfinanceから取得
-            try:
-                info = get_company_info(row["Symbol"])
-                if info["name"] != f"{row['Symbol']} Stock":
-                    combined_df.at[idx, "Name"] = info["name"]
-            except Exception as e:
-                print(f"Error updating name for {row['Symbol']}: {e}")
-                combined_df.at[idx, "Name"] = f"{row['Symbol']} Stock"
-    
-    # キャッシュに保存
-    combined_df.to_csv(TICKER_CACHE, index=False)
-    return combined_df
+    save_stock_data(initial_data)
+    return convert_to_dataframe(initial_data)
 
 @lru_cache(maxsize=1024)
 def fuzzy_search(query: str, limit: int = 10, market: str = None):
@@ -214,7 +197,7 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
         # 初期データを使用
         df = pd.DataFrame(INITIAL_TICKERS + JAPAN_TICKERS)
         df["Market"] = df["Symbol"].apply(lambda x: "Japan" if str(x).endswith(".T") else "US")
-        df.to_csv(TICKER_CACHE, index=False)
+        save_stock_data(df.to_dict('records'))
         print(f"初期データをロードしました：{len(df)}件")
     
     # 日本株の件数を確認
@@ -334,37 +317,37 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
         except Exception as e:
             print(f"{col}での検索中にエラーが発生しました: {e}")
     
-    # 3. data.csvからの検索（日本株の場合）
+    # 3. 日本株の場合の追加検索
     if market is None or market == "Japan":
         try:
-            # data.csvを読み込む
-            jpx_df = pd.read_csv(JPX_DATA_FILE)
-            if jpx_df is not None and len(jpx_df) > 0:
+            # DynamoDBから日本株データを取得
+            japan_df = df[df["Symbol"].str.endswith(".T")].copy()
+            if len(japan_df) > 0:
                 # 既存の結果のシンボルを取得
                 existing_symbols = {r["symbol"] for r in results}
                 
                 # 日本語名で検索
-                japanese_matches = jpx_df[jpx_df["銘柄名"].str.contains(query, na=False)]
+                japanese_matches = japan_df[japan_df["Name"].str.contains(query, na=False)]
                 
                 # 新しい結果を追加
                 for _, row in japanese_matches.iterrows():
                     if len(results) >= limit:
                         break
                         
-                    symbol = f"{row['コード']}.T"
+                    symbol = row['Symbol']
                     if symbol not in existing_symbols:
                         results.append({
                             "symbol": symbol,
-                            "name": row["銘柄名"],
+                            "name": row["Name"],
                             "score": 85,  # 通常の検索より少し低いスコア
                             "asset_type": AssetType.STOCK,
                             "market": "Japan",
-                            "logo_url": None
+                            "logo_url": LOGO_URLS.get(symbol)
                         })
                         existing_symbols.add(symbol)
-                        print(f"data.csv一致：{symbol} ({row['銘柄名']})")
+                        print(f"日本株一致：{symbol} ({row['Name']})")
         except Exception as e:
-            print(f"data.csv検索中にエラーが発生しました: {e}")
+            print(f"日本株検索中にエラーが発生しました: {e}")
     
     # 4. 追加：日本語名のあいまい検索（特にJAPAN_TICKERSからのデータ確保）
     if not results and query:
@@ -440,16 +423,16 @@ def reset_ticker_cache():
         combined_df = pd.concat([sp500, japan_stocks], ignore_index=True)
         print(f"合計 {len(combined_df)} 銘柄のデータを取得しました（米国: {len(sp500)}, 日本: {len(japan_stocks)}）")
     
-        # キャッシュに保存
-        combined_df.to_csv(TICKER_CACHE, index=False)
-        print(f"データを {TICKER_CACHE} に保存しました")
+        # DynamoDBに保存
+        save_stock_data(combined_df.to_dict('records'))
+        print("データをDynamoDBに保存しました")
         return combined_df
     except Exception as e:
         print(f"銘柄マスタの更新中にエラーが発生しました: {e}")
         # 初期データを使用
         df = pd.DataFrame(INITIAL_TICKERS + JAPAN_TICKERS)
         df["Market"] = df["Symbol"].apply(lambda x: "Japan" if str(x).endswith(".T") else "US")
-        df.to_csv(TICKER_CACHE, index=False)
+        save_stock_data(df.to_dict('records'))
         return df
 
 def get_company_info(symbol: str):
@@ -599,20 +582,9 @@ def add_japan_stocks_to_cache():
     """
     print("銘柄マスタに日本株を追加します...")
     
-    # 現在のデータを読み込む
-    current_data = None
-    if TICKER_CACHE.exists():
-        try:
-            current_data = pd.read_csv(TICKER_CACHE)
-            print(f"既存のデータを読み込みました: {len(current_data)}件")
-        except Exception as e:
-            print(f"既存データの読み込みに失敗しました: {e}")
-            current_data = None
-    
-    # データが読み込めなかった場合は新規作成
-    if current_data is None:
-        print("データが読み込めなかったため、新規作成します")
-        current_data = pd.DataFrame()
+    # 現在のデータを取得
+    current_items = get_stock_data()
+    current_data = convert_to_dataframe(current_items) if current_items else pd.DataFrame()
     
     # 日本株データを取得
     japan_df = pd.DataFrame(JAPAN_TICKERS)
@@ -621,7 +593,7 @@ def add_japan_stocks_to_cache():
     
     # 既存データに日本株が含まれているかチェック
     japan_symbols = set()
-    if 'Symbol' in current_data.columns:
+    if not current_data.empty and 'Symbol' in current_data.columns:
         japan_symbols = set(current_data[current_data['Symbol'].str.endswith('.T')]['Symbol'])
     
     # 既に含まれている日本株の数を表示
@@ -632,7 +604,7 @@ def add_japan_stocks_to_cache():
     print(f"新たに追加する日本株: {len(new_japan_stocks)}件")
     
     # 既存データがない場合は米国株も追加
-    if len(current_data) == 0:
+    if current_data.empty:
         print("既存データがないため、米国株も追加します")
         us_df = pd.DataFrame(INITIAL_TICKERS)
         us_df["Market"] = "US"
@@ -644,9 +616,9 @@ def add_japan_stocks_to_cache():
         combined_df = pd.concat([current_data, new_japan_stocks], ignore_index=True)
         print(f"合計データ: {len(combined_df)}件")
         
-        # キャッシュに保存
-        combined_df.to_csv(TICKER_CACHE, index=False)
-        print(f"データを {TICKER_CACHE} に保存しました")
+        # DynamoDBに保存
+        save_stock_data(combined_df.to_dict('records'))
+        print("データをDynamoDBに保存しました")
         
         # キャッシュをクリア
         load_ticker_master.cache_clear()
@@ -692,20 +664,9 @@ def expand_stock_data():
     """銘柄マスタを拡充し、S&P 500とJAPAN_TICKERSのデータを追加する"""
     print("銘柄マスタを拡充しています...")
     
-    # 現在のデータを読み込む
-    current_data = None
-    if TICKER_CACHE.exists():
-        try:
-            current_data = pd.read_csv(TICKER_CACHE)
-            print(f"既存のデータを読み込みました: {len(current_data)}件")
-        except Exception as e:
-            print(f"既存データの読み込みに失敗しました: {e}")
-            current_data = None
-    
-    # データが読み込めなかった場合は新規作成
-    if current_data is None:
-        print("データが読み込めなかったため、新規作成します")
-        current_data = pd.DataFrame()
+    # 現在のデータを取得
+    current_items = get_stock_data()
+    current_data = convert_to_dataframe(current_items) if current_items else pd.DataFrame()
     
     # 米国株データを取得
     us_stocks = load_us_stocks()
@@ -718,7 +679,7 @@ def expand_stock_data():
     
     # 既存のシンボルを取得
     existing_symbols = set()
-    if 'Symbol' in current_data.columns:
+    if not current_data.empty and 'Symbol' in current_data.columns:
         existing_symbols = set(current_data['Symbol'])
     
     # 既存データに含まれていない米国株のみを追加
@@ -732,7 +693,7 @@ def expand_stock_data():
     # 新しいデータを追加
     if len(new_us_stocks) > 0 or len(new_japan_stocks) > 0:
         # 既存データがなければ、米国株と日本株を追加
-        if len(current_data) == 0:
+        if current_data.empty:
             combined_df = pd.concat([us_stocks, japan_stocks], ignore_index=True)
         else:
             combined_df = pd.concat([current_data, new_us_stocks, new_japan_stocks], ignore_index=True)
@@ -747,9 +708,9 @@ def expand_stock_data():
         if 'Market' not in combined_df.columns:
             combined_df['Market'] = combined_df['Symbol'].apply(lambda x: 'Japan' if str(x).endswith('.T') else 'US')
         
-        # キャッシュに保存
-        combined_df.to_csv(TICKER_CACHE, index=False)
-        print(f"データを {TICKER_CACHE} に保存しました")
+        # DynamoDBに保存
+        save_stock_data(combined_df.to_dict('records'))
+        print("データをDynamoDBに保存しました")
         
         # キャッシュをクリア
         load_ticker_master.cache_clear()
@@ -1274,64 +1235,33 @@ def get_related_markets(symbol: str, limit: int = 5):
 
 def load_jpx_data():
     """
-    CSVファイルから日本株データを読み込む関数
+    DynamoDBから日本株データを読み込む関数
     """
     try:
-        # ファイルの存在確認
-        if not JPX_DATA_FILE.exists():
-            print(f"JPXデータファイル {JPX_DATA_FILE} が見つかりません")
+        # DynamoDBからデータを取得
+        items = get_stock_data()
+        if not items:
+            print("DynamoDBからデータを取得できませんでした")
             return None, {}
             
-        # CSVファイルを読み込む
-        jpx_df = pd.read_csv(JPX_DATA_FILE)
+        # データフレームに変換
+        df = convert_to_dataframe(items)
         
-        # カラム名を確認
-        expected_columns = ["コード", "銘柄名", "市場・商品区分", "33業種区分"]
+        # 日本株のみを抽出
+        japan_df = df[df["Symbol"].str.endswith(".T")].copy()
         
-        # カラム名の確認と調整
-        if "コード" in jpx_df.columns and "銘柄名" in jpx_df.columns:
-            # 必要なカラムを抽出
-            essential_columns = ["コード", "銘柄名"]
-            
-            # 利用可能な追加カラムを確認して追加
-            additional_columns = []
-            if "市場・商品区分" in jpx_df.columns:
-                additional_columns.append("市場・商品区分")
-            if "33業種区分" in jpx_df.columns:
-                additional_columns.append("33業種区分")
-                
-            selected_columns = essential_columns + additional_columns
-            jpx_df = jpx_df[selected_columns]
-            
-            # カラム名を英語に変換
-            column_map = {
-                "コード": "Code",
-                "銘柄名": "Name"
-            }
-            
-            if "市場・商品区分" in jpx_df.columns:
-                column_map["市場・商品区分"] = "MarketSegment"
-            if "33業種区分" in jpx_df.columns:
-                column_map["33業種区分"] = "Sector"
-                
-            jpx_df = jpx_df.rename(columns=column_map)
-            
-            # Yahoo Financeで使用するシンボル形式に変換（コードに.Tを追加）
-            jpx_df["Symbol"] = jpx_df["Code"].astype(str).str.zfill(4) + ".T"
-            
-            # 市場情報を設定
-            jpx_df["Market"] = "Japan"
-            
-            # シンボルと日本語名のマッピング作成
-            jpx_symbols_map = dict(zip(jpx_df["Symbol"], jpx_df["Name"]))
-            
-            print(f"JPXから {len(jpx_df)} 件の日本株データを読み込みました")
-            return jpx_df, jpx_symbols_map
-        else:
-            print("JPXデータの形式が予期しないものです。カラム構造を確認してください。")
+        if len(japan_df) == 0:
+            print("日本株データが見つかりませんでした")
             return None, {}
+            
+        # シンボルと日本語名のマッピング作成
+        jpx_symbols_map = dict(zip(japan_df["Symbol"], japan_df["Name"]))
+        
+        print(f"DynamoDBから {len(japan_df)} 件の日本株データを読み込みました")
+        return japan_df, jpx_symbols_map
+        
     except Exception as e:
-        print(f"JPXデータの読み込み中にエラーが発生しました: {e}")
+        print(f"日本株データの読み込み中にエラーが発生しました: {e}")
         return None, {}
 
 # JPX銘柄名の辞書
