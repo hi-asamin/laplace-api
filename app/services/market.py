@@ -80,62 +80,6 @@ LOGO_URLS = {
   "6645.T": "https://logo.clearbit.com/omron.com" # オムロン
 }
 
-# 基本的な銘柄データ（外部データ取得に失敗した場合のフォールバック用）
-INITIAL_TICKERS = [
-    {"Symbol": "AAPL", "Name": "Apple Inc."},
-    {"Symbol": "MSFT", "Name": "Microsoft Corporation"},
-    {"Symbol": "AMZN", "Name": "Amazon.com Inc."},
-    {"Symbol": "GOOGL", "Name": "Alphabet Inc."},
-    {"Symbol": "FB", "Name": "Meta Platforms Inc."},
-    {"Symbol": "TSLA", "Name": "Tesla Inc."},
-    {"Symbol": "BRK-B", "Name": "Berkshire Hathaway Inc."},
-    {"Symbol": "NVDA", "Name": "NVIDIA Corporation"},
-    {"Symbol": "JPM", "Name": "JPMorgan Chase & Co."},
-    {"Symbol": "JNJ", "Name": "Johnson & Johnson"}
-]
-
-# 日本株銘柄の基本データ
-JAPAN_TICKERS = [
-    {"Symbol": "7203.T", "Name": "トヨタ自動車"},
-    {"Symbol": "9432.T", "Name": "日本電信電話"},
-    {"Symbol": "9984.T", "Name": "ソフトバンクグループ"},
-    {"Symbol": "6861.T", "Name": "キーエンス"},
-    {"Symbol": "6758.T", "Name": "ソニーグループ"},
-    {"Symbol": "8306.T", "Name": "三菱UFJフィナンシャル・グループ"},
-    {"Symbol": "6501.T", "Name": "日立製作所"},
-    {"Symbol": "9433.T", "Name": "KDDI"},
-    {"Symbol": "4063.T", "Name": "信越化学工業"},
-    {"Symbol": "9983.T", "Name": "ファーストリテイリング"}
-]
-
-def load_japan_stocks():
-    """
-    日本の株式データを取得する
-    JPXデータを優先的に使用し、取得できない場合は初期データを使用します
-    """
-    try:
-        # JPXデータをロード
-        jpx_df, _ = load_jpx_data() or (None, {})
-        
-        if jpx_df is not None and len(jpx_df) > 0:
-            print(f"JPXデータから {len(jpx_df)} 件の日本株データを読み込みました")
-            return jpx_df
-        
-        # JPXデータが取得できなかった場合は初期データを使用
-        print("JPXデータが取得できなかったため、初期データを使用します")
-        japan_df = pd.DataFrame(JAPAN_TICKERS)
-        japan_df["Market"] = "Japan"
-        print(f"初期データから {len(japan_df)} 件の日本株データを読み込みました")
-        return japan_df
-    
-    except Exception as e:
-        print(f"日本株データの読み込み中にエラーが発生しました: {e}")
-        # エラーが発生した場合、空のデータフレームを返す
-        japan_df = pd.DataFrame(JAPAN_TICKERS)
-        japan_df["Market"] = "Japan"
-        print(f"初期データから {len(japan_df)} 件の日本株データを読み込みました")
-        return japan_df
-
 @lru_cache(maxsize=1)
 def load_ticker_master():
     """銘柄マスターデータをロードする関数"""
@@ -1263,16 +1207,6 @@ def load_jpx_data():
     except Exception as e:
         print(f"日本株データの読み込み中にエラーが発生しました: {e}")
         return None, {}
-
-# JPX銘柄名の辞書
-JPX_SYMBOLS_MAP = {}
-
-# 初期化時にJPXデータをロード
-try:
-    _, JPX_SYMBOLS_MAP = load_jpx_data() or (None, {})
-    print(f"JPX銘柄辞書を {len(JPX_SYMBOLS_MAP)} 件ロードしました")
-except Exception as e:
-    print(f"JPX銘柄辞書のロード中にエラーが発生しました: {e}")
 
 def update_jpx_symbols_map():
     """

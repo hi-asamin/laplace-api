@@ -11,15 +11,9 @@ load_dotenv('.env.local')
 
 # 環境変数から設定を取得
 aws_region = os.getenv('AWS_DEFAULT_REGION', 'ap-northeast-1')
-aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
-aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 # DynamoDBクライアントの初期化
-dynamodb = boto3.resource('dynamodb',
-    region_name=aws_region,
-    aws_access_key_id=aws_access_key,
-    aws_secret_access_key=aws_secret_key
-)
+dynamodb = boto3.resource('dynamodb', region_name=aws_region)
 
 table = dynamodb.Table('LaplaceMarketData')
 
@@ -98,12 +92,15 @@ def update_stock_data(symbol: str, update_data: Dict[str, Any]) -> bool:
         # 更新式と属性値を構築
         update_expression = "SET "
         expression_attribute_values = {}
+        expression_attribute_names = {}
         
         for key, value in update_data.items():
             if key != 'symbol':  # symbolは更新できない
                 # キー名を小文字に変換
                 dynamo_key = key.lower()
-                update_expression += f"{dynamo_key} = :{dynamo_key}, "
+                # 予約語をエスケープ
+                expression_attribute_names[f"#{dynamo_key}"] = dynamo_key
+                update_expression += f"#{dynamo_key} = :{dynamo_key}, "
                 expression_attribute_values[f":{dynamo_key}"] = value
         
         update_expression = update_expression.rstrip(", ")
@@ -112,7 +109,8 @@ def update_stock_data(symbol: str, update_data: Dict[str, Any]) -> bool:
         table.update_item(
             Key={'symbol': symbol},
             UpdateExpression=update_expression,
-            ExpressionAttributeValues=expression_attribute_values
+            ExpressionAttributeValues=expression_attribute_values,
+            ExpressionAttributeNames=expression_attribute_names
         )
         return True
     except ClientError as e:
