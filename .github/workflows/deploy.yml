@@ -84,6 +84,9 @@ jobs:
               --publish
             echo "Function code updated successfully from S3."
 
+            aws lambda wait function-updated --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+            echo "Function update completed."
+
             # ランタイムやハンドラ、環境変数などの設定更新は通常通り行えます
             echo "Updating function configuration (if needed)..."
             aws lambda update-function-configuration \
