@@ -46,10 +46,10 @@ jobs:
             ${DOCKER_IMAGE} \
             /bin/sh -c "python -m pip install --upgrade pip && \
                         pip install -r /var/task/requirements.txt -t /var/task/deployment_package_dir"
-          
+
           cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
           if [ -d "app" ]; then cp -r app ./deployment_package_dir/; fi # FastAPIのappディレクトリなど
-          
+
           cd deployment_package_dir
           zip -r ../deployment_package.zip .
           cd ..
@@ -63,7 +63,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: ⬆️ Upload deployment package to S3
-       run: |
+        run: |
           # S3キーには関数名とタイムスタンプ/Gitハッシュを含めるとバージョン管理しやすくなりますが、ここではシンプルに固定名でアップロードします。
           # 必要であればaws s3api put-objectの--metadataなどでバージョン情報を付与することも可能です。
           S3_OBJECT_PATH="${{ env.S3_KEY_PREFIX }}/${{ env.LAMBDA_FUNCTION_NAME }}/deployment_package.zip"
@@ -74,7 +74,7 @@ jobs:
         run: |
           S3_OBJECT_PATH_FOR_LAMBDA="${{ env.S3_KEY_PREFIX }}/${{ env.LAMBDA_FUNCTION_NAME }}/deployment_package.zip"
           echo "Checking if Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists in region '${{ env.AWS_REGION }}'..."
-          
+
           if aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} > /dev/null 2>&1; then
             echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists. Updating function code from S3..."
             aws lambda update-function-code \
