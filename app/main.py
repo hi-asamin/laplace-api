@@ -42,9 +42,15 @@ app = FastAPI(
 )
 
 # CORSミドルウェアの設定
+origins = [
+    "https://wwwlaplace.com",
+    "https://wwwlaplace.com/",
+    "http://localhost:3000",  # 開発環境用
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 本番環境では具体的なオリジンのリストに変更すべき
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
