@@ -12,6 +12,8 @@ env:
   PYTHON_VERSION: "3.12"
   LAMBDA_HANDLER: lambda_function.handler # Lambdaハンドラー (ファイル名.関数名)
   LAMBDA_HANDLER_FILE: lambda_function.py # Lambdaハンドラーが含まれるPythonファイル名
+  S3_BUCKET_FOR_LAMBDA: app-deployments-bucket
+  S3_KEY_PREFIX: laplace-lambda-deployments
 
 jobs:
   deploy_lambda:
@@ -36,47 +38,22 @@ jobs:
           echo "PYTHON_VERSION is: ${{ env.PYTHON_VERSION }}"
 
           DOCKER_IMAGE="public.ecr.aws/lambda/python:${{ env.PYTHON_VERSION }}"
-          # Lambda関数のアーキテクチャに合わせてプラットフォームを指定してください。
-          # x86_64 の場合: "linux/amd64"
-          # arm64 の場合: "linux/arm64" (DOCKER_IMAGEもarm64対応のもの, 例: ...python:${{ env.PYTHON_VERSION }}-arm64)
-          DOCKER_PLATFORM="linux/amd64" 
+          DOCKER_PLATFORM="linux/amd64"
 
-          echo "Creating package directory: deployment_package_dir"
           mkdir -p deployment_package_dir
-
-          echo "Running pip install in Docker container (${DOCKER_IMAGE}, platform: ${DOCKER_PLATFORM}) to build for Lambda environment..."
-
-          # ★★★ 修正点: --entrypoint "" を追加 ★★★
           docker run --platform ${DOCKER_PLATFORM} --entrypoint "" \
             -v "$(pwd)":/var/task \
             ${DOCKER_IMAGE} \
-            /bin/sh -c "echo 'Inside container: Installing dependencies...' && \
-                        python -m pip install --upgrade pip && \
-                        pip install -r /var/task/requirements.txt -t /var/task/deployment_package_dir && \
-                        echo 'Inside container: Dependencies installed.'"
-
-          # ファイルのコピー処理は、Dockerコンテナ実行後、ホスト側で行います。
-          echo "Copying Lambda handler file ('${{ env.LAMBDA_HANDLER_FILE }}') to package directory..."
-          if [ -f "${{ env.LAMBDA_HANDLER_FILE }}" ]; then
-            cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
-          else
-            echo "Error: Lambda handler file '${{ env.LAMBDA_HANDLER_FILE }}' not found in repository root."
-            exit 1
-          fi
-
-          echo "Copying 'app' directory to package directory..."
-          if [ -d "app" ]; then
-            cp -r app ./deployment_package_dir/
-          else
-            # 'app' ディレクトリが必須でない場合は Warning にしても良い
-            echo "Info: 'app' directory not found. If your application uses it, this might lead to issues."
-          fi
-
-          echo "Creating ZIP file (deployment_package.zip) from deployment_package_dir..."
+            /bin/sh -c "python -m pip install --upgrade pip && \
+                        pip install -r /var/task/requirements.txt -t /var/task/deployment_package_dir"
+          
+          cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
+          if [ -d "app" ]; then cp -r app ./deployment_package_dir/; fi # FastAPIのappディレクトリなど
+          
           cd deployment_package_dir
           zip -r ../deployment_package.zip .
           cd ..
-          echo "Deployment package 'deployment_package.zip' created with dependencies."
+          echo "Deployment package 'deployment_package.zip' created."
 
       - name: 🔑 Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -85,33 +62,46 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # GitHub Secrets に設定
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: 🚀 Deploy to AWS Lambda
+       run: |
+          # S3キーには関数名とタイムスタンプ/Gitハッシュを含めるとバージョン管理しやすくなりますが、ここではシンプルに固定名でアップロードします。
+          # 必要であればaws s3api put-objectの--metadataなどでバージョン情報を付与することも可能です。
+          S3_OBJECT_PATH="${{ env.S3_KEY_PREFIX }}/${{ env.LAMBDA_FUNCTION_NAME }}/deployment_package.zip"
+          aws s3 cp deployment_package.zip s3://${{ env.S3_BUCKET_FOR_LAMBDA }}/${S3_OBJECT_PATH}
+          echo "Package uploaded to s3://${{ env.S3_BUCKET_FOR_LAMBDA }}/${S3_OBJECT_PATH}"
+
+      - name: Deploy to AWS Lambda from S3
         run: |
+          S3_OBJECT_PATH_FOR_LAMBDA="${{ env.S3_KEY_PREFIX }}/${{ env.LAMBDA_FUNCTION_NAME }}/deployment_package.zip"
           echo "Checking if Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists in region '${{ env.AWS_REGION }}'..."
+          
           if aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} > /dev/null 2>&1; then
-            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists. Updating function code..."
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists. Updating function code from S3..."
             aws lambda update-function-code \
               --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-              --zip-file fileb://deployment_package.zip \
+              --s3-bucket ${{ env.S3_BUCKET_FOR_LAMBDA }} \
+              --s3-key ${S3_OBJECT_PATH_FOR_LAMBDA} \
               --publish
-            echo "Function code updated successfully."
+            echo "Function code updated successfully from S3."
 
-            echo "Updating function configuration (runtime and handler)..."
+            # ランタイムやハンドラ、環境変数などの設定更新は通常通り行えます
+            echo "Updating function configuration (if needed)..."
             aws lambda update-function-configuration \
               --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
               --handler ${{ env.LAMBDA_HANDLER }} \
               --runtime python${{ env.PYTHON_VERSION }}
-            echo "Function configuration updated successfully."
+              # --environment Variables={NEW_VAR="new_value"} # 環境変数更新の例
+            echo "Function configuration updated."
+
           else
-            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' does not exist. Creating new function..."
-            echo "IMPORTANT: Ensure 'LAMBDA_EXECUTION_ROLE_ARN' is correctly set in GitHub Secrets."
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' does not exist. Creating new function from S3..."
             aws lambda create-function \
               --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
               --runtime python${{ env.PYTHON_VERSION }} \
               --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \
               --handler ${{ env.LAMBDA_HANDLER }} \
-              --zip-file fileb://deployment_package.zip \
+              --code S3Bucket=${{ env.S3_BUCKET_FOR_LAMBDA }},S3Key=${S3_OBJECT_PATH_FOR_LAMBDA} \
               --publish
-            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' created successfully."
+              # --environment Variables={INIT_VAR="initial_value"} # 環境変数設定の例
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' created successfully from S3."
             echo "IMPORTANT: Please verify the function's IAM role, memory, timeout, and other settings in the AWS Console."
           fi
