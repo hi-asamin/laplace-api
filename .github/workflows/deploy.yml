@@ -1,4 +1,5 @@
-name: Deploy to AWS Lambda
+# .github/workflows/deploy.yaml
+name: Deploy Python Lambda API to AWS
 
 on:
   push:
@@ -8,43 +9,84 @@ on:
 env:
   AWS_REGION: ap-northeast-1
   LAMBDA_FUNCTION_NAME: laplace-api
+  PYTHON_VERSION: "3.12"
+  LAMBDA_HANDLER: lambda_function.handler # Lambdaハンドラー (ファイル名.関数名)
+  LAMBDA_HANDLER_FILE: lambda_function.py # Lambdaハンドラーが含まれるPythonファイル名
 
 jobs:
-  deploy:
+  deploy_lambda:
+    name: Deploy Lambda Function to AWS
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Set up Python
+    steps:
+      - name: ⬇️ Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
+      - name: 📦 Install dependencies and create package
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          mkdir deployment_package_dir
+          if [ -f requirements.txt ]; then
+            echo "requirements.txt found. Installing dependencies..."
+            pip install -r requirements.txt -t ./deployment_package_dir
+          else
+            echo "requirements.txt not found. Skipping dependency installation."
+          fi
+          echo "Copying Lambda handler file (${{ env.LAMBDA_HANDLER_FILE }}) to package directory..."
+          cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
+          echo "Creating ZIP file from package directory..."
+          cd deployment_package_dir
+          zip -r ../deployment_package.zip .
+          cd ..
+          echo "Deployment package 'deployment_package.zip' created with dependencies."
 
-      - name: Create deployment package
+      - name: 📦 Create deployment package (Lambda handler file only)
+        # 依存ライブラリがない場合は、このステップを使用します。
+        # 依存ライブラリがある場合は、このステップをコメントアウトし、上記の「Install dependencies and create package」ステップを使用してください。
         run: |
-          mkdir -p deployment
-          cp -r app deployment/
-          cp lambda_function.py deployment/
-          cd deployment
-          find . -type d -name "__pycache__" -exec rm -r {} +
-          find . -type d -name "*.dist-info" -exec rm -r {} +
-          find . -type d -name "*.egg-info" -exec rm -r {} +
-          zip -r ../function.zip .
+          echo "Creating ZIP file with handler (${{ env.LAMBDA_HANDLER_FILE }}) only..."
+          zip deployment_package.zip ${{ env.LAMBDA_HANDLER_FILE }}
+          echo "Deployment package 'deployment_package.zip' created."
 
-      - name: Configure AWS credentials
+      - name: 🔑 Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }} # GitHub Secrets に設定
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # GitHub Secrets に設定
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy to AWS Lambda
+      - name: 🚀 Deploy to AWS Lambda
         run: |
-          aws lambda update-function-code \
-            --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
-            --zip-file fileb://function.zip
+          echo "Checking if Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists in region '${{ env.AWS_REGION }}'..."
+          if aws lambda get-function --function-name ${{ env.LAMBDA_FUNCTION_NAME }} > /dev/null 2>&1; then
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' exists. Updating function code..."
+            aws lambda update-function-code \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --zip-file fileb://deployment_package.zip \
+              --publish
+            echo "Function code updated successfully."
+
+            echo "Updating function configuration (runtime and handler)..."
+            aws lambda update-function-configuration \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --handler ${{ env.LAMBDA_HANDLER }} \
+              --runtime python${{ env.PYTHON_VERSION }}
+            echo "Function configuration updated successfully."
+          else
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' does not exist. Creating new function..."
+            echo "IMPORTANT: Ensure 'LAMBDA_EXECUTION_ROLE_ARN' is correctly set in GitHub Secrets."
+            aws lambda create-function \
+              --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+              --runtime python${{ env.PYTHON_VERSION }} \
+              --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \ # GitHub Secrets に設定
+              --handler ${{ env.LAMBDA_HANDLER }} \
+              --zip-file fileb://deployment_package.zip \
+              --publish
+            echo "Lambda function '${{ env.LAMBDA_FUNCTION_NAME }}' created successfully."
+            echo "IMPORTANT: Please verify the function's IAM role, memory, timeout, and other settings in the AWS Console."
+          fi
