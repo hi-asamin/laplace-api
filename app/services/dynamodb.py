@@ -10,27 +10,16 @@ from dotenv import load_dotenv
 load_dotenv('.env.local')
 
 # 環境変数から設定を取得
-is_local = os.getenv('ENVIRONMENT') == 'local'
 aws_region = os.getenv('AWS_DEFAULT_REGION', 'ap-northeast-1')
 aws_access_key = os.getenv('AWS_ACCESS_KEY_ID')
 aws_secret_key = os.getenv('AWS_SECRET_ACCESS_KEY')
 
 # DynamoDBクライアントの初期化
-if is_local and os.getenv('USE_LOCAL_DYNAMODB') == 'true':
-    # ローカルのDynamoDBを使用する場合
-    dynamodb = boto3.resource('dynamodb',
-        endpoint_url='http://localhost:8000',
-        region_name=aws_region,
-        aws_access_key_id='dummy',
-        aws_secret_access_key='dummy'
-    )
-else:
-    # 本番環境のDynamoDBを使用する場合
-    dynamodb = boto3.resource('dynamodb',
-        region_name=aws_region,
-        aws_access_key_id=aws_access_key,
-        aws_secret_access_key=aws_secret_key
-    )
+dynamodb = boto3.resource('dynamodb',
+    region_name=aws_region,
+    aws_access_key_id=aws_access_key,
+    aws_secret_access_key=aws_secret_key
+)
 
 table = dynamodb.Table('LaplaceMarketData')
 
