@@ -62,6 +62,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }} # GitHub Secrets に設定
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: ⬆️ Upload deployment package to S3
        run: |
           # S3キーには関数名とタイムスタンプ/Gitハッシュを含めるとバージョン管理しやすくなりますが、ここではシンプルに固定名でアップロードします。
           # 必要であればaws s3api put-objectの--metadataなどでバージョン情報を付与することも可能です。
