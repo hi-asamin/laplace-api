@@ -31,27 +31,38 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           mkdir deployment_package_dir
-          if [ -f requirements.txt ]; then
-            echo "requirements.txt found. Installing dependencies..."
-            pip install -r requirements.txt -t ./deployment_package_dir
-          else
-            echo "requirements.txt not found. Skipping dependency installation."
-          fi
-          echo "Copying Lambda handler file (${{ env.LAMBDA_HANDLER_FILE }}) to package directory..."
-          cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
-          echo "Creating ZIP file from package directory..."
+          # 必要な依存関係のみをインストール
+          pip install --target ./deployment_package_dir \
+            fastapi==0.110.0 \
+            uvicorn==0.27.1 \
+            mangum==0.17.0 \
+            python-multipart==0.0.9 \
+            python-jose==3.3.0 \
+            passlib==1.7.4 \
+            pydantic-core==2.16.3 \
+            typing-extensions==4.10.0 \
+            requests==2.31.0
+
+          # アプリケーションコードをコピー
+          cp -r app deployment_package_dir/
+          cp ${{ env.LAMBDA_HANDLER_FILE }} deployment_package_dir/
+
+          # 不要なファイルを削除
           cd deployment_package_dir
+          find . -type d -name "__pycache__" -exec rm -r {} +
+          find . -type d -name "*.dist-info" -exec rm -r {} +
+          find . -type d -name "*.egg-info" -exec rm -r {} +
+          find . -type f -name "*.pyc" -delete
+          find . -type f -name "*.pyo" -delete
+          find . -type f -name "*.pyd" -delete
+          find . -type f -name "*.so" -delete
+          find . -type f -name "*.dylib" -delete
+          find . -type f -name "*.dll" -delete
+
+          # ZIPファイルを作成
           zip -r ../deployment_package.zip .
           cd ..
-          echo "Deployment package 'deployment_package.zip' created with dependencies."
-
-      - name: 📦 Create deployment package (Lambda handler file only)
-        # 依存ライブラリがない場合は、このステップを使用します。
-        # 依存ライブラリがある場合は、このステップをコメントアウトし、上記の「Install dependencies and create package」ステップを使用してください。
-        run: |
-          echo "Creating ZIP file with handler (${{ env.LAMBDA_HANDLER_FILE }}) only..."
-          zip deployment_package.zip ${{ env.LAMBDA_HANDLER_FILE }}
-          echo "Deployment package 'deployment_package.zip' created."
+          echo "Deployment package size: $(du -h deployment_package.zip | cut -f1)"
 
       - name: 🔑 Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -83,7 +94,7 @@ jobs:
             aws lambda create-function \
               --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
               --runtime python${{ env.PYTHON_VERSION }} \
-              --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \ # GitHub Secrets に設定
+              --role ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }} \
               --handler ${{ env.LAMBDA_HANDLER }} \
               --zip-file fileb://deployment_package.zip \
               --publish
