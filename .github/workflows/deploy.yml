@@ -33,23 +33,29 @@ jobs:
           echo "LAMBDA_HANDLER is: ${{ env.LAMBDA_HANDLER }}"
           echo "AWS_REGION is: ${{ env.AWS_REGION }}"
           echo "LAMBDA_FUNCTION_NAME is: ${{ env.LAMBDA_FUNCTION_NAME }}"
+          echo "PYTHON_VERSION is: ${{ env.PYTHON_VERSION }}"
 
-          # Lambdaのアーキテクチャに合わせてDockerイメージとプラットフォームを指定
-          # デフォルトは x86_64 (linux/amd64)
-          # Lambdaがarm64の場合は、DOCKER_IMAGEをarm64用に変更し、--platformをlinux/arm64にしてください
-          # 例: DOCKER_IMAGE="public.ecr.aws/lambda/python:${{ env.PYTHON_VERSION }}-arm64"
           DOCKER_IMAGE="public.ecr.aws/lambda/python:${{ env.PYTHON_VERSION }}"
-          DOCKER_PLATFORM="linux/amd64" # x86_64 Lambdaの場合。arm64の場合は "linux/arm64"
+          # Lambda関数のアーキテクチャに合わせてプラットフォームを指定してください。
+          # x86_64 の場合: "linux/amd64"
+          # arm64 の場合: "linux/arm64" (DOCKER_IMAGEもarm64対応のもの, 例: ...python:${{ env.PYTHON_VERSION }}-arm64)
+          DOCKER_PLATFORM="linux/amd64" 
 
           echo "Creating package directory: deployment_package_dir"
           mkdir -p deployment_package_dir
 
           echo "Running pip install in Docker container (${DOCKER_IMAGE}, platform: ${DOCKER_PLATFORM}) to build for Lambda environment..."
-          # requirements.txtをコンテナにコピーしてインストールするか、マウントして実行します。
-          # ここではカレントディレクトリをマウントします。
-          docker run --platform ${DOCKER_PLATFORM} -v "$(pwd)":/var/task ${DOCKER_IMAGE} /bin/sh -c \
-            "pip install -r /var/task/requirements.txt -t /var/task/deployment_package_dir; exit"
 
+          # ★★★ 修正点: --entrypoint "" を追加 ★★★
+          docker run --platform ${DOCKER_PLATFORM} --entrypoint "" \
+            -v "$(pwd)":/var/task \
+            ${DOCKER_IMAGE} \
+            /bin/sh -c "echo 'Inside container: Installing dependencies...' && \
+                        python -m pip install --upgrade pip && \
+                        pip install -r /var/task/requirements.txt -t /var/task/deployment_package_dir && \
+                        echo 'Inside container: Dependencies installed.'"
+
+          # ファイルのコピー処理は、Dockerコンテナ実行後、ホスト側で行います。
           echo "Copying Lambda handler file ('${{ env.LAMBDA_HANDLER_FILE }}') to package directory..."
           if [ -f "${{ env.LAMBDA_HANDLER_FILE }}" ]; then
             cp ${{ env.LAMBDA_HANDLER_FILE }} ./deployment_package_dir/
@@ -59,11 +65,12 @@ jobs:
           fi
 
           echo "Copying 'app' directory to package directory..."
-          if [ -d "app" ]; then                                 
-            cp -r app ./deployment_package_dir/                 
-          else                                                  
-            echo "Warning: 'app' directory not found in repository root. If your FastAPI app is in 'app/', this will cause an ImportError."
-          fi 
+          if [ -d "app" ]; then
+            cp -r app ./deployment_package_dir/
+          else
+            # 'app' ディレクトリが必須でない場合は Warning にしても良い
+            echo "Info: 'app' directory not found. If your application uses it, this might lead to issues."
+          fi
 
           echo "Creating ZIP file (deployment_package.zip) from deployment_package_dir..."
           cd deployment_package_dir
