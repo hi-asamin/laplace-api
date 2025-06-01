@@ -1055,6 +1055,7 @@ def get_fundamental_data(symbol: str):
         print(f"Error fetching fundamental data for {symbol}: {e}")
         raise ValueError(f"Failed to fetch fundamental data for {symbol}")
 
+@lru_cache(maxsize=1024)
 def get_related_markets(symbol: str, limit: int = 5):
     """
     関連銘柄を取得する関数
@@ -1068,15 +1069,14 @@ def get_related_markets(symbol: str, limit: int = 5):
     """
     try:
         # シンボルから市場とセクターを判断
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        company_info = get_company_info(symbol)
-        
-        sector = company_info.get('sector', '')
         is_japan_stock = symbol.endswith('.T')
         market = "Japan" if is_japan_stock else "US"
         
-        # 同一セクターの銘柄を取得（実際のAPIではより高度な関連性分析が必要）
+        # 基本情報を取得（キャッシュ済みの関数を使用）
+        company_info = get_company_info(symbol)
+        sector = company_info.get('sector', '')
+        
+        # 同一セクターの銘柄を取得（キャッシュ済みの関数を使用）
         df = load_ticker_master()
         
         # セクター情報がない場合は空のリストを返す
@@ -1113,7 +1113,7 @@ def get_related_markets(symbol: str, limit: int = 5):
         for _, row in related_symbols.iterrows():
             rel_symbol = row['Symbol']
             try:
-                # 価格情報を取得
+                # 価格情報を取得（キャッシュ済みの関数を使用）
                 price_info = get_stock_price(rel_symbol)
                 
                 # 前日比の数値を計算
@@ -1122,7 +1122,7 @@ def get_related_markets(symbol: str, limit: int = 5):
                 latest_price = price_info["price"]
                 
                 try:
-                    latest_price_value = float(latest_price.replace(currency_symbol, ""))
+                    latest_price_value = float(latest_price.replace(currency_symbol, "").replace(",", ""))
                     change_percent_value = float(change_percent.replace("%", "").replace("+", ""))
                     change_value = (latest_price_value * change_percent_value / 100)
                     change = f"{'+' if change_percent_value > 0 else ''}{currency_symbol}{change_value:.2f}"
@@ -1131,11 +1131,11 @@ def get_related_markets(symbol: str, limit: int = 5):
                     change = "+0.00" if "+" in change_percent else "-0.00"
                     is_positive = "+" in change_percent
                 
-                # 企業情報を取得
+                # 企業情報を取得（キャッシュ済みの関数を使用）
                 rel_company_info = get_company_info(rel_symbol)
                 
                 # ロゴURLを取得
-                logo_url = rel_company_info.get('logoUrl')
+                logo_url = LOGO_URLS.get(rel_symbol)
                 
                 # 事前定義したロゴがない場合はClearbitから取得（企業ドメインがあれば）
                 if not logo_url and rel_company_info.get('website'):
@@ -1148,7 +1148,7 @@ def get_related_markets(symbol: str, limit: int = 5):
                 # アイテムを追加
                 items.append({
                     "symbol": rel_symbol,
-                    "name": row.get('Name', rel_symbol),
+                    "name": row.get('Name', rel_company_info.get('name', rel_symbol)),
                     "price": price_info["price"],
                     "change": change,
                     "change_percent": price_info["change_percent"],
