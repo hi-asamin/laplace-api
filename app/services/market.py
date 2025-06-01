@@ -388,15 +388,10 @@ def get_company_info(symbol: str):
         # 日本株の場合は日本語名を優先
         japanese_name = None
         if symbol.endswith(".T"):
-            # JPXデータから日本語名を検索
-            japanese_name = JPX_SYMBOLS_MAP.get(symbol)
-            
-            # JPXデータになければJAPAN_TICKERSから検索
-            if not japanese_name:
-                for ticker in JAPAN_TICKERS:
-                    if ticker["Symbol"] == symbol:
-                        japanese_name = ticker["Name"]
-                        break
+            # DynamoDBから直接データを取得
+            stock_data = get_stock_data(symbol)
+            if stock_data and len(stock_data) > 0:
+                japanese_name = stock_data[0].get("name")
         
         ticker = yf.Ticker(symbol)
         info = ticker.info
@@ -435,18 +430,12 @@ def get_company_info(symbol: str):
         print(f"Error fetching info for {symbol}: {e}")
         # エラー時も日本語名と可能ならロゴURLを提供
         if symbol.endswith(".T"):
-            # JPXデータから日本語名を検索
-            japanese_name = JPX_SYMBOLS_MAP.get(symbol)
-            
-            # JPXデータになければJAPAN_TICKERSから検索
-            if not japanese_name:
-                for ticker in JAPAN_TICKERS:
-                    if ticker["Symbol"] == symbol:
-                        japanese_name = ticker["Name"]
-                        break
-            
-            if japanese_name:
-                return {"name": japanese_name, "logoUrl": LOGO_URLS.get(symbol)}
+            # DynamoDBから直接データを取得
+            stock_data = get_stock_data(symbol)
+            if stock_data and len(stock_data) > 0:
+                japanese_name = stock_data[0].get("name")
+                if japanese_name:
+                    return {"name": japanese_name, "logoUrl": LOGO_URLS.get(symbol)}
         
         # その他のケース
         logo_url = LOGO_URLS.get(symbol)
