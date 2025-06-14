@@ -14,7 +14,7 @@ from .dynamodb import (
     update_stock_data,
     convert_to_dataframe
 )
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
 JPX_DATA_FILE = Path(__file__).parent / "data.csv"  # .xlsから.csvに変更
@@ -80,6 +80,46 @@ LOGO_URLS = {
   "6645.T": "https://logo.clearbit.com/omron.com" # オムロン
 }
 
+# 静的銘柄データ（曖昧検索用）
+INITIAL_TICKERS = [
+    {"Symbol": "AAPL", "Name": "Apple Inc.", "Market": "US"},
+    {"Symbol": "MSFT", "Name": "Microsoft Corporation", "Market": "US"},
+    {"Symbol": "GOOGL", "Name": "Alphabet Inc.", "Market": "US"},
+    {"Symbol": "AMZN", "Name": "Amazon.com Inc.", "Market": "US"},
+    {"Symbol": "TSLA", "Name": "Tesla Inc.", "Market": "US"},
+    {"Symbol": "META", "Name": "Meta Platforms Inc.", "Market": "US"},
+    {"Symbol": "NVDA", "Name": "NVIDIA Corporation", "Market": "US"},
+    {"Symbol": "NFLX", "Name": "Netflix Inc.", "Market": "US"},
+    {"Symbol": "PYPL", "Name": "PayPal Holdings Inc.", "Market": "US"},
+    {"Symbol": "ADBE", "Name": "Adobe Inc.", "Market": "US"},
+    {"Symbol": "CRM", "Name": "Salesforce Inc.", "Market": "US"},
+    {"Symbol": "ORCL", "Name": "Oracle Corporation", "Market": "US"},
+    {"Symbol": "IBM", "Name": "International Business Machines Corporation", "Market": "US"},
+    {"Symbol": "INTC", "Name": "Intel Corporation", "Market": "US"},
+    {"Symbol": "AMD", "Name": "Advanced Micro Devices Inc.", "Market": "US"},
+    {"Symbol": "SPY", "Name": "SPDR S&P 500 ETF Trust", "Market": "US"},
+    {"Symbol": "QQQ", "Name": "Invesco QQQ Trust", "Market": "US"},
+    {"Symbol": "VTI", "Name": "Vanguard Total Stock Market ETF", "Market": "US"},
+]
+
+JAPAN_TICKERS = [
+    {"Symbol": "7203.T", "Name": "トヨタ自動車", "EnglishName": "Toyota Motor Corporation", "Market": "Japan"},
+    {"Symbol": "6758.T", "Name": "ソニーグループ", "EnglishName": "Sony Group Corporation", "Market": "Japan"},
+    {"Symbol": "7974.T", "Name": "任天堂", "EnglishName": "Nintendo Co., Ltd.", "Market": "Japan"},
+    {"Symbol": "9432.T", "Name": "日本電信電話", "EnglishName": "Nippon Telegraph and Telephone Corporation", "Market": "Japan"},
+    {"Symbol": "9984.T", "Name": "ソフトバンクグループ", "EnglishName": "SoftBank Group Corp.", "Market": "Japan"},
+    {"Symbol": "6902.T", "Name": "デンソー", "EnglishName": "DENSO Corporation", "Market": "Japan"},
+    {"Symbol": "6752.T", "Name": "パナソニック", "EnglishName": "Panasonic Holdings Corporation", "Market": "Japan"},
+    {"Symbol": "7267.T", "Name": "ホンダ", "EnglishName": "Honda Motor Co., Ltd.", "Market": "Japan"},
+    {"Symbol": "4502.T", "Name": "武田薬品工業", "EnglishName": "Takeda Pharmaceutical Company Limited", "Market": "Japan"},
+    {"Symbol": "8058.T", "Name": "三菱商事", "EnglishName": "Mitsubishi Corporation", "Market": "Japan"},
+    {"Symbol": "8031.T", "Name": "三井物産", "EnglishName": "Mitsui & Co., Ltd.", "Market": "Japan"},
+    {"Symbol": "9983.T", "Name": "ファーストリテイリング", "EnglishName": "Fast Retailing Co., Ltd.", "Market": "Japan"},
+    {"Symbol": "4755.T", "Name": "楽天グループ", "EnglishName": "Rakuten Group, Inc.", "Market": "Japan"},
+    {"Symbol": "9201.T", "Name": "日本航空", "EnglishName": "Japan Airlines Co., Ltd.", "Market": "Japan"},
+    {"Symbol": "9202.T", "Name": "ANAホールディングス", "EnglishName": "ANA Holdings Inc.", "Market": "Japan"},
+]
+
 @lru_cache(maxsize=1)
 def load_ticker_master():
     """銘柄マスターデータをロードする関数"""
@@ -115,53 +155,31 @@ def load_ticker_master():
     return convert_to_dataframe(initial_data)
 
 @lru_cache(maxsize=1024)
-def fuzzy_search(query: str, limit: int = 10, market: str = None):
+def fuzzy_search_lightweight(query: str, limit: int = 10, market: str = None):
     """
-    株式銘柄をあいまい検索する関数
+    軽量版曖昧検索関数（DynamoDBアクセスなし）
     
-    要件:
-    1. 完全一致があれば、その結果のみを返す
-    2. 部分一致は以下の優先順位:
-       - 先頭一致（例: 「トヨタ」で「トヨタ自動車」）
-       - 単語一致（例: 「自動車」で「トヨタ自動車」）
-       - 部分一致（例: 「ヨタ」で「トヨタ自動車」）
-    3. 日本株と米国株の両方を検索対象にする
+    静的データのみを使用して高速検索を実行
+    
+    Args:
+        query: 検索クエリ
+        limit: 検索結果の上限数
+        market: 市場フィルタ（"US", "Japan", None）
+        
+    Returns:
+        List[Dict]: 検索結果
     """
-    # 検査クエリが短すぎないかチェック
+    # 検索クエリのバリデーション
     if not query or len(query.strip()) < 1:
-        return []  # INVALID_QUERY エラー相当
+        return []
     
-    # データロード
-    df = load_ticker_master()
-    
-    # マスターデータのロードステータスとサイズを出力
-    print(f"銘柄マスターロード完了：合計 {len(df)} 件")
-    if len(df) == 0:
-        print("警告：銘柄マスターが空です")
-        # 初期データを使用
-        df = pd.DataFrame(INITIAL_TICKERS + JAPAN_TICKERS)
-        df["Market"] = df["Symbol"].apply(lambda x: "Japan" if str(x).endswith(".T") else "US")
-        save_stock_data(df.to_dict('records'))
-        print(f"初期データをロードしました：{len(df)}件")
-    
-    # 日本株の件数を確認
-    japan_count = len(df[df["Symbol"].str.endswith(".T")])
-    print(f"日本株データ：{japan_count}件")
-    
-    # 欠損値を処理
-    df = df.fillna('')
-    
-    # 市場区分が設定されているか確認
-    if 'Market' not in df.columns:
-        # シンボルから推定する
-        df['Market'] = df['Symbol'].apply(lambda x: 'Japan' if str(x).endswith('.T') else 'US')
+    # 静的データを取得
+    df = get_static_ticker_data()
     
     # 検索クエリの前処理
     query = query.strip()
     lower_query = query.lower()
-    print(f"検索クエリ：'{query}'（変換後：'{lower_query}'）")
     
-    # 結果格納用リスト
     results = []
     
     # 1. シンボルでの検索
@@ -170,35 +188,192 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
         exact_matches = df[df['Symbol'].str.lower() == lower_query]
         for _, row in exact_matches.iterrows():
             symbol = row['Symbol']
-            # ロゴURLを取得
-            logo_url = LOGO_URLS.get(symbol)
-            
             results.append({
                 'symbol': symbol,
-                'name': row.get('Name', row.get('EnglishName', '')),
+                'name': row['Name'],
                 'score': 100,
-                'asset_type': AssetType.STOCK,  # デフォルトは株式
-                'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
-                'logo_url': logo_url
+                'asset_type': AssetType.STOCK,
+                'market': row['Market'],
+                'logo_url': LOGO_URLS.get(symbol)
             })
-            print(f"シンボル完全一致：{symbol}")
         
         # 部分一致
         contains = df[df['Symbol'].str.lower().str.contains(lower_query, na=False)]
         for _, row in contains.iterrows():
             symbol = row['Symbol']
-            # ロゴURLを取得
-            logo_url = LOGO_URLS.get(symbol)
+            if not any(r['symbol'] == symbol for r in results):  # 重複を避ける
+                results.append({
+                    'symbol': symbol,
+                    'name': row['Name'],
+                    'score': 90,
+                    'asset_type': AssetType.STOCK,
+                    'market': row['Market'],
+                    'logo_url': LOGO_URLS.get(symbol)
+                })
+    except Exception as e:
+        print(f"シンボル検索中にエラーが発生しました: {e}")
+    
+    # 2. 名前での検索（日本語名・英語名両方）
+    for col in ['Name', 'EnglishName']:
+        if col not in df.columns:
+            continue
+        
+        try:
+            # 完全一致
+            exact_matches = df[df[col].str.lower() == lower_query]
+            for _, row in exact_matches.iterrows():
+                symbol = row['Symbol']
+                if not any(r['symbol'] == symbol for r in results):  # 重複を避ける
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 100,
+                        'asset_type': AssetType.STOCK,
+                        'market': row['Market'],
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
             
+            # 先頭一致
+            starts_with = df[df[col].str.lower().str.startswith(lower_query)]
+            for _, row in starts_with.iterrows():
+                symbol = row['Symbol']
+                if not any(r['symbol'] == symbol for r in results):
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 90,
+                        'asset_type': AssetType.STOCK,
+                        'market': row['Market'],
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
+            
+            # 部分一致
+            contains = df[df[col].str.lower().str.contains(lower_query, na=False)]
+            for _, row in contains.iterrows():
+                symbol = row['Symbol']
+                if not any(r['symbol'] == symbol for r in results):
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 80,
+                        'asset_type': AssetType.STOCK,
+                        'market': row['Market'],
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
+        except Exception as e:
+            print(f"{col}での検索中にエラーが発生しました: {e}")
+    
+    # スコア順にソート
+    results.sort(key=lambda x: x.get('score', 0), reverse=True)
+    
+    # 市場でフィルタリング
+    if market:
+        results = [r for r in results if r['market'] == market]
+    
+    return results[:limit]
+
+@lru_cache(maxsize=1024)
+def fuzzy_search(query: str, limit: int = 10, market: str = None):
+    """
+    株式銘柄をあいまい検索する関数（リファクタリング版）
+    
+    まず静的データで検索し、結果が不十分な場合のみDynamoDBにアクセス
+    
+    Args:
+        query: 検索クエリ
+        limit: 検索結果の上限数
+        market: 市場フィルタ（"US", "Japan", None）
+        
+    Returns:
+        List[Dict]: 検索結果
+    """
+    # 検索クエリのバリデーション
+    if not query or len(query.strip()) < 1:
+        return []
+    
+    # Step 1: 静的データから検索
+    static_results = fuzzy_search_lightweight(query, limit, market)
+    
+    # 十分な結果が得られた場合はそれを返す（最低3件、またはlimitに達した場合）
+    if len(static_results) >= min(limit, 3) or len(static_results) >= limit:
+        print(f"静的データ検索で {len(static_results)} 件の結果を取得（DynamoDBアクセスなし）")
+        return static_results
+    
+    # Step 2: 結果が少ない場合のみ、DynamoDBから追加データを取得
+    print(f"静的データ検索結果: {len(static_results)} 件。DynamoDBから追加データを取得します。")
+    
+    try:
+        # DynamoDBからデータを取得
+        df = load_ticker_master()
+        
+        if len(df) == 0:
+            print("DynamoDB取得失敗、静的データ結果を返します")
+            return static_results
+        
+        # 既存の検索ロジックを実行（DynamoDBデータ使用）
+        additional_results = search_in_dataframe(query, limit - len(static_results), market, df)
+        
+        # 重複を除去して結合
+        combined_results = static_results.copy()
+        existing_symbols = {r['symbol'] for r in static_results}
+        
+        for result in additional_results:
+            if result['symbol'] not in existing_symbols:
+                combined_results.append(result)
+                existing_symbols.add(result['symbol'])
+        
+        print(f"最終結果: {len(combined_results)} 件（静的: {len(static_results)}, DynamoDB: {len(additional_results)}）")
+        return combined_results[:limit]
+        
+    except Exception as e:
+        print(f"DynamoDB検索中にエラーが発生しました: {e}")
+        return static_results
+
+def search_in_dataframe(query: str, limit: int, market: str, df: pd.DataFrame):
+    """
+    DataFrameから検索を実行するヘルパー関数
+    """
+    # 欠損値を処理
+    df = df.fillna('')
+    
+    # 市場区分が設定されているか確認
+    if 'Market' not in df.columns:
+        df['Market'] = df['Symbol'].apply(lambda x: 'Japan' if str(x).endswith('.T') else 'US')
+    
+    # 検索クエリの前処理
+    query = query.strip()
+    lower_query = query.lower()
+    
+    results = []
+    
+    # 1. シンボルでの検索
+    try:
+        # 完全一致
+        exact_matches = df[df['Symbol'].str.lower() == lower_query]
+        for _, row in exact_matches.iterrows():
+            symbol = row['Symbol']
             results.append({
                 'symbol': symbol,
                 'name': row.get('Name', row.get('EnglishName', '')),
-                'score': 90,
-                'asset_type': AssetType.STOCK,  # デフォルトは株式
+                'score': 100,
+                'asset_type': AssetType.STOCK,
                 'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
-                'logo_url': logo_url
+                'logo_url': LOGO_URLS.get(symbol)
             })
-            print(f"シンボル部分一致：{symbol}")
+        
+        # 部分一致
+        contains = df[df['Symbol'].str.lower().str.contains(lower_query, na=False)]
+        for _, row in contains.iterrows():
+            symbol = row['Symbol']
+            if not any(r['symbol'] == symbol for r in results):
+                results.append({
+                    'symbol': symbol,
+                    'name': row.get('Name', row.get('EnglishName', '')),
+                    'score': 90,
+                    'asset_type': AssetType.STOCK,
+                    'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
+                    'logo_url': LOGO_URLS.get(symbol)
+                })
     except Exception as e:
         print(f"シンボル検索中にエラーが発生しました: {e}")
     
@@ -207,130 +382,61 @@ def fuzzy_search(query: str, limit: int = 10, market: str = None):
         if col not in df.columns:
             continue
         
-        try:          
+        try:
             # 完全一致
             exact_matches = df[df[col].str.lower() == lower_query]
             for _, row in exact_matches.iterrows():
                 symbol = row['Symbol']
-                # ロゴURLを取得
-                logo_url = LOGO_URLS.get(symbol)
-                
-                results.append({
-                    'symbol': symbol,
-                    'name': row.get('Name', row.get('EnglishName', '')),
-                    'score': 100,
-                    'asset_type': AssetType.STOCK,  # デフォルトは株式
-                    'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
-                    'logo_url': logo_url
-                })
-                print(f"名前完全一致[{col}]：{symbol} ({row.get('Name', '')})")
+                if not any(r['symbol'] == symbol for r in results):
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 100,
+                        'asset_type': AssetType.STOCK,
+                        'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
             
             # 先頭一致
             starts_with = df[df[col].str.lower().str.startswith(lower_query)]
             for _, row in starts_with.iterrows():
                 symbol = row['Symbol']
-                # ロゴURLを取得
-                logo_url = LOGO_URLS.get(symbol)
-                
-                results.append({
-                    'symbol': symbol,
-                    'name': row.get('Name', row.get('EnglishName', '')),
-                    'score': 90,
-                    'asset_type': AssetType.STOCK,  # デフォルトは株式
-                    'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
-                    'logo_url': logo_url
-                })
-                print(f"先頭一致[{col}]：{symbol} ({row.get('Name', '')})")
+                if not any(r['symbol'] == symbol for r in results):
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 90,
+                        'asset_type': AssetType.STOCK,
+                        'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
             
-            # 含む（部分一致）
+            # 部分一致
             contains = df[df[col].str.lower().str.contains(lower_query, na=False)]
             for _, row in contains.iterrows():
                 symbol = row['Symbol']
-                # ロゴURLを取得
-                logo_url = LOGO_URLS.get(symbol)
-                
-                results.append({
-                    'symbol': symbol,
-                    'name': row.get('Name', row.get('EnglishName', '')),
-                    'score': 80,
-                    'asset_type': AssetType.STOCK,  # デフォルトは株式
-                    'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
-                    'logo_url': logo_url
-                })
-                print(f"部分一致[{col}]：{symbol} ({row.get('Name', '')})")
+                if not any(r['symbol'] == symbol for r in results):
+                    results.append({
+                        'symbol': symbol,
+                        'name': row.get('Name', row.get('EnglishName', '')),
+                        'score': 80,
+                        'asset_type': AssetType.STOCK,
+                        'market': row.get('Market', 'US' if not symbol.endswith('.T') else 'Japan'),
+                        'logo_url': LOGO_URLS.get(symbol)
+                    })
         except Exception as e:
             print(f"{col}での検索中にエラーが発生しました: {e}")
     
-    # 3. 日本株の場合の追加検索
-    if market is None or market == "Japan":
-        try:
-            # DynamoDBから日本株データを取得
-            japan_df = df[df["Symbol"].str.endswith(".T")].copy()
-            if len(japan_df) > 0:
-                # 既存の結果のシンボルを取得
-                existing_symbols = {r["symbol"] for r in results}
-                
-                # 日本語名で検索
-                japanese_matches = japan_df[japan_df["Name"].str.contains(query, na=False)]
-                
-                # 新しい結果を追加
-                for _, row in japanese_matches.iterrows():
-                    if len(results) >= limit:
-                        break
-                        
-                    symbol = row['Symbol']
-                    if symbol not in existing_symbols:
-                        results.append({
-                            "symbol": symbol,
-                            "name": row["Name"],
-                            "score": 85,  # 通常の検索より少し低いスコア
-                            "asset_type": AssetType.STOCK,
-                            "market": "Japan",
-                            "logo_url": LOGO_URLS.get(symbol)
-                        })
-                        existing_symbols.add(symbol)
-                        print(f"日本株一致：{symbol} ({row['Name']})")
-        except Exception as e:
-            print(f"日本株検索中にエラーが発生しました: {e}")
-    
-    # 4. 追加：日本語名のあいまい検索（特にJAPAN_TICKERSからのデータ確保）
-    if not results and query:
-        print("通常検索でヒットしないため、初期データから検索を行います")
-        # 初期データから検索
-        for ticker in JAPAN_TICKERS:
-            ticker_name = ticker.get("Name", "")
-            symbol = ticker.get("Symbol", "")
-            # 名前に検索クエリが含まれるか
-            if query.lower() in ticker_name.lower():
-                # ロゴURLを取得
-                logo_url = LOGO_URLS.get(symbol)
-                
-                results.append({
-                    'symbol': symbol,
-                    'name': ticker_name,
-                    'score': 80,
-                    'asset_type': AssetType.STOCK,
-                    'market': 'Japan',
-                    'logo_url': logo_url
-                })
-                print(f"初期データ一致：{symbol} ({ticker_name})")
-    
-    # 重複を削除（シンボルベース）
-    unique_results = []
-    seen_symbols = set()
-    for r in results:
-        if r['symbol'] not in seen_symbols:
-            unique_results.append(r)
-            seen_symbols.add(r['symbol'])
-    
     # スコア順にソート
-    unique_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+    results.sort(key=lambda x: x.get('score', 0), reverse=True)
     
     # 市場でフィルタリング
     if market:
-        unique_results = [r for r in unique_results if r['market'] == market]
+        results = [r for r in results if r['market'] == market]
     
-    return unique_results[:limit]
+    return results[:limit]
+
+
 
 @lru_cache(maxsize=256)
 def get_price_history(symbol: str, period: str):
@@ -653,6 +759,102 @@ def expand_stock_data():
         print("新たに追加するデータはありません")
         return current_data
 
+def calculate_dividend_yield(symbol: str, info: dict) -> Optional[str]:
+    """
+    配当利回りを計算する関数
+    
+    Args:
+        symbol: 銘柄シンボル
+        info: yfinanceから取得した銘柄情報
+        
+    Returns:
+        Optional[str]: 配当利回り（%表記）、配当がない場合はNone
+    """
+    try:
+        # 1. 最も確実な方法：配当レートと現在価格から計算
+        dividend_rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
+        current_price = (info.get('currentPrice') or 
+                        info.get('regularMarketPrice') or 
+                        info.get('previousClose'))
+        
+        if dividend_rate and current_price and current_price > 0:
+            dividend_yield = (dividend_rate / current_price) * 100
+            return f"{dividend_yield:.2f}%"
+        
+        # 2. trailingAnnualDividendYieldを使用（より信頼性が高い）
+        trailing_yield = info.get('trailingAnnualDividendYield')
+        if trailing_yield and trailing_yield > 0:
+            # trailingAnnualDividendYieldは既にパーセンテージ形式の場合と小数形式の場合がある
+            if trailing_yield < 1:  # 小数形式の場合（0.05 = 5%）
+                dividend_yield = trailing_yield * 100
+            else:  # パーセンテージ形式の場合（5.0 = 5%）
+                dividend_yield = trailing_yield
+            return f"{dividend_yield:.2f}%"
+        
+        # 3. dividendYieldを使用（フォールバック）
+        dividend_yield_value = info.get('dividendYield')
+        if dividend_yield_value and dividend_yield_value > 0:
+            # dividendYieldの値の範囲を判定
+            if dividend_yield_value < 1:  # 小数形式の場合（0.05 = 5%）
+                dividend_yield = dividend_yield_value * 100
+            else:  # パーセンテージ形式の場合（5.0 = 5%）
+                dividend_yield = dividend_yield_value
+            return f"{dividend_yield:.2f}%"
+        
+        # 4. ETFや指数の場合、yield情報を取得
+        if info.get('yield') and info.get('yield') > 0:
+            yield_value = info.get('yield', 0) * 100
+            return f"{yield_value:.2f}%"
+        
+        # 5. S&P500などの指数の場合、過去の平均利回りを推定
+        if is_index_symbol(symbol):
+            # S&P500の場合は平均配当利回り約1.8%を使用
+            if symbol.upper() in ['SPY', '^SPX', 'SPX', '^GSPC']:
+                return "1.80%"
+            # その他の指数も一般的な利回りを返す
+            return "1.50%"
+        
+        # 6. 配当がない場合は0.00%を返す
+        # dividendRateが明示的に0またはNoneの場合
+        if (dividend_rate == 0 or dividend_rate is None) and current_price:
+            return "0.00%"
+        
+        return None
+        
+    except Exception as e:
+        print(f"Error calculating dividend yield for {symbol}: {e}")
+        return None
+
+def is_index_symbol(symbol: str) -> bool:
+    """
+    シンボルが指数かどうかを判別する関数
+    
+    Args:
+        symbol: 銘柄シンボル
+        
+    Returns:
+        bool: 指数の場合True
+    """
+    # 一般的な指数シンボルのパターン
+    index_patterns = [
+        '^',  # Yahoo Finance指数プレフィックス
+        'SPY', 'QQQ', 'IWM',  # 主要ETF
+        'VOO', 'VTI', 'VEA',  # Vanguard ETF
+    ]
+    
+    symbol_upper = symbol.upper()
+    
+    # プレフィックスチェック
+    if symbol.startswith('^'):
+        return True
+    
+    # 主要指数ETFチェック
+    for pattern in index_patterns[1:]:  # '^'以外をチェック
+        if symbol_upper.startswith(pattern):
+            return True
+    
+    return False
+
 def get_market_details(symbol: str):
     """
     銘柄の詳細情報を取得する関数
@@ -716,6 +918,9 @@ def get_market_details(symbol: str):
             domain = company_info['website'].replace('https://', '').replace('http://', '').split('/')[0]
             logo_url = f"https://logo.clearbit.com/{domain}"
         
+        # 配当利回りを計算
+        dividend_yield = calculate_dividend_yield(symbol, info)
+        
         return {
             "symbol": symbol,
             "name": company_info.get('name', symbol),
@@ -732,6 +937,7 @@ def get_market_details(symbol: str):
             "description": info.get('longBusinessSummary', None),
             "website": company_info.get('website', None),
             "trading_info": trading_info,
+            "dividend_yield": dividend_yield,
             "last_updated": last_updated
         }
     except Exception as e:
@@ -1263,3 +1469,19 @@ def enhance_ticker_master_with_jpx():
     except Exception as e:
         print(f"銘柄マスタの拡充中にエラーが発生しました: {e}")
         return False 
+
+@lru_cache(maxsize=1)
+def get_static_ticker_data():
+    """
+    静的銘柄データを取得する軽量関数
+    DynamoDBアクセスを避けて高速検索を実現
+    """
+    # 静的データを結合してDataFrameを作成
+    all_tickers = INITIAL_TICKERS + JAPAN_TICKERS
+    df = pd.DataFrame(all_tickers)
+    
+    # 欠損値処理
+    df = df.fillna('')
+    
+    print(f"静的銘柄データ読み込み完了：合計 {len(df)} 件（米国: {len(INITIAL_TICKERS)}, 日本: {len(JAPAN_TICKERS)}）")
+    return df

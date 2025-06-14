@@ -30,4 +30,5 @@ class MarketDetails(BaseModel):
     description: Optional[str] = Field(None, description="企業概要")
     website: Optional[str] = Field(None, description="企業のウェブサイト")
     trading_info: TradingInfo = Field(..., description="取引情報")
+    dividend_yield: Optional[str] = Field(None, description="配当利回り（%）")
     last_updated: str = Field(..., description="情報取得日時（ISO 8601形式）") 

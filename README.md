@@ -190,6 +190,8 @@ docker run -p 8000:8000 amazon/dynamodb-local
 
 ```bash
 # 開発モードで起動
+source venv/bin/activate
+
 python -m uvicorn app.main:app --reload
 ```
 
