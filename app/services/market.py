@@ -1207,6 +1207,28 @@ def get_fundamental_data(symbol: str):
         eps = info.get('trailingEps', 0)
         pe_ratio = info.get('trailingPE', 0)
         
+        # 業界平均データを取得
+        industry_averages_data = None
+        industry = info.get('industry', '')
+        sector = info.get('sector', '')
+        
+        # 業界平均サービスをインポート
+        from app.services.industry_averages import industry_averages_service
+        
+        # まず業界名で検索、見つからなければセクター名で検索
+        industry_avg = industry_averages_service.get_industry_averages(industry)
+        if not industry_avg and sector:
+            industry_avg = industry_averages_service.get_industry_averages(sector)
+        
+        if industry_avg:
+            industry_averages_data = {
+                "industry_name": industry_avg["industry_name"],
+                "average_per": f"{industry_avg['average_per']:.1f}",
+                "average_pbr": f"{industry_avg['average_pbr']:.1f}",
+                "sample_size": industry_avg["sample_size"],
+                "last_updated": industry_avg["last_updated"]
+            }
+        
         key_metrics = {
             "eps": f"{eps:.2f}",
             "pe_ratio": f"{pe_ratio:.2f}",
@@ -1218,7 +1240,8 @@ def get_fundamental_data(symbol: str):
             "debt_to_equity": f"{info.get('debtToEquity', 0):.1f}%" if info.get('debtToEquity') else None,
             "current_ratio": f"{info.get('currentRatio', 0):.2f}" if info.get('currentRatio') else None,
             "operating_margin": f"{info.get('operatingMargins', 0) * 100:.1f}%" if info.get('operatingMargins') else None,
-            "profit_margin": f"{info.get('profitMargins', 0) * 100:.1f}%" if info.get('profitMargins') else None
+            "profit_margin": f"{info.get('profitMargins', 0) * 100:.1f}%" if info.get('profitMargins') else None,
+            "industry_averages": industry_averages_data
         }
         
         # 配当情報

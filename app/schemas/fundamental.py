@@ -10,6 +10,14 @@ class QuarterlyEarning(BaseModel):
     previous_year_value: Optional[str] = Field(None, description="前年同期の一株当たり純利益")
     growth_rate: Optional[str] = Field(None, description="前年同期比成長率")
 
+class IndustryAverages(BaseModel):
+    """業界平均指標モデル"""
+    industry_name: str = Field(..., description="業界名")
+    average_per: Optional[str] = Field(None, description="業界平均PER")
+    average_pbr: Optional[str] = Field(None, description="業界平均PBR")
+    sample_size: Optional[int] = Field(None, description="サンプル企業数")
+    last_updated: Optional[str] = Field(None, description="最終更新日")
+
 class KeyMetrics(BaseModel):
     """主要指標モデル"""
     eps: str = Field(..., description="一株当たり利益（直近12ヶ月）")
@@ -23,6 +31,7 @@ class KeyMetrics(BaseModel):
     current_ratio: Optional[str] = Field(None, description="流動比率")
     operating_margin: Optional[str] = Field(None, description="営業利益率")
     profit_margin: Optional[str] = Field(None, description="純利益率")
+    industry_averages: Optional[IndustryAverages] = Field(None, description="業界平均指標")
 
 class DividendData(BaseModel):
     """配当情報モデル"""
