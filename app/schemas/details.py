@@ -13,6 +13,18 @@ class TradingInfo(BaseModel):
     pe_ratio: Optional[str] = Field(None, description="PER（株価収益率）")
     primary_exchange: str = Field(..., description="主要取引所")
 
+class CompanyProfile(BaseModel):
+    """企業プロフィール情報モデル"""
+    company_name: str = Field(..., description="企業名")
+    logo_url: Optional[str] = Field(None, description="企業ロゴ画像のURL")
+    website: Optional[str] = Field(None, description="公式サイトのURL")
+    market_cap_formatted: Optional[str] = Field(None, description="兆・億単位に整形済みの時価総額")
+    business_summary: Optional[str] = Field(None, description="事業内容のサマリー")
+    industry_tags: List[str] = Field([], description="業種を示すタグのリスト")
+    full_time_employees: Optional[int] = Field(None, description="従業員数")
+    foundation_year: Optional[int] = Field(None, description="設立年")
+    headquarters: Optional[str] = Field(None, description="本社所在地")
+
 class MarketDetails(BaseModel):
     """銘柄詳細情報のレスポンスモデル"""
     symbol: str = Field(..., description="銘柄シンボル")
@@ -31,4 +43,5 @@ class MarketDetails(BaseModel):
     website: Optional[str] = Field(None, description="企業のウェブサイト")
     trading_info: TradingInfo = Field(..., description="取引情報")
     dividend_yield: Optional[str] = Field(None, description="配当利回り（%）")
+    company_profile: CompanyProfile = Field(..., description="企業プロフィール情報")
     last_updated: str = Field(..., description="情報取得日時（ISO 8601形式）") 

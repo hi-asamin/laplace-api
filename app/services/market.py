@@ -921,6 +921,9 @@ def get_market_details(symbol: str):
         # 配当利回りを計算
         dividend_yield = calculate_dividend_yield(symbol, info)
         
+        # 企業プロフィール情報を取得
+        company_profile_data = get_company_profile(symbol)
+        
         return {
             "symbol": symbol,
             "name": company_info.get('name', symbol),
@@ -938,6 +941,7 @@ def get_market_details(symbol: str):
             "website": company_info.get('website', None),
             "trading_info": trading_info,
             "dividend_yield": dividend_yield,
+            "company_profile": company_profile_data,
             "last_updated": last_updated
         }
     except Exception as e:
@@ -1250,11 +1254,15 @@ def get_fundamental_data(symbol: str):
             "estimated_eps_growth": f"+{random.uniform(3, 8):.1f}%"  # モックデータ
         }
         
+        # 配当履歴を取得
+        dividend_history = get_dividend_history(symbol)
+        
         return {
             "symbol": symbol,
             "quarterly_earnings": quarterly_earnings,
             "key_metrics": key_metrics,
             "dividend_data": dividend_data,
+            "dividend_history": dividend_history,
             "valuation_growth": valuation_growth
         }
     except Exception as e:
@@ -1485,3 +1493,279 @@ def get_static_ticker_data():
     
     print(f"静的銘柄データ読み込み完了：合計 {len(df)} 件（米国: {len(INITIAL_TICKERS)}, 日本: {len(JAPAN_TICKERS)}）")
     return df
+
+def format_market_cap(market_cap_value, currency_symbol=""):
+    """
+    時価総額を兆・億単位で整形する関数
+    
+    Args:
+        market_cap_value: 時価総額の数値
+        currency_symbol: 通貨記号（"¥", "$"等）
+        
+    Returns:
+        str: 整形された時価総額文字列
+    """
+    try:
+        if not market_cap_value or market_cap_value == 0:
+            return None
+            
+        # 兆の単位（1兆 = 1,000,000,000,000）
+        if market_cap_value >= 1_000_000_000_000:
+            trillion_value = market_cap_value / 1_000_000_000_000
+            return f"{currency_symbol}{trillion_value:.1f}兆円" if currency_symbol == "¥" else f"{currency_symbol}{trillion_value:.1f}T"
+        
+        # 億の単位（1億 = 100,000,000）
+        elif market_cap_value >= 100_000_000:
+            if currency_symbol == "¥":
+                oku_value = market_cap_value / 100_000_000
+                return f"{currency_symbol}{oku_value:.1f}億円"
+            else:
+                # 米国株の場合は10億以上でBillion単位（10億 = 1B）
+                if market_cap_value >= 1_000_000_000:
+                    billion_value = market_cap_value / 1_000_000_000
+                    return f"{currency_symbol}{billion_value:.1f}B"
+                else:
+                    # 10億未満は百万単位で表示
+                    million_value = market_cap_value / 1_000_000
+                    return f"{currency_symbol}{million_value:.1f}M"
+        
+        # 百万の単位
+        elif market_cap_value >= 1_000_000:
+            million_value = market_cap_value / 1_000_000
+            return f"{currency_symbol}{million_value:.1f}M"
+        
+        # そのまま表示
+        else:
+            return f"{currency_symbol}{market_cap_value:,}"
+            
+    except Exception as e:
+        print(f"時価総額の整形中にエラーが発生しました: {e}")
+        return None
+
+def get_company_profile(symbol: str):
+    """
+    企業プロフィール情報を取得する関数
+    
+    Args:
+        symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
+        
+    Returns:
+        dict: 企業プロフィール情報
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        
+        # 通貨記号を決定
+        currency_symbol = "¥" if symbol.endswith('.T') else "$"
+        
+        # 企業名を取得
+        company_name = (info.get('longName') or 
+                       info.get('shortName') or 
+                       info.get('name') or 
+                       symbol)
+        
+        # ロゴURLを取得
+        logo_url = LOGO_URLS.get(symbol)
+        if not logo_url and info.get('website'):
+            # ウェブサイトからClearbitロゴを生成
+            try:
+                domain = info['website'].replace('https://', '').replace('http://', '').split('/')[0]
+                logo_url = f"https://logo.clearbit.com/{domain}"
+            except:
+                logo_url = None
+        
+        # 時価総額を整形
+        market_cap_formatted = None
+        if info.get('marketCap'):
+            market_cap_formatted = format_market_cap(info['marketCap'], currency_symbol)
+        
+        # 業種タグを作成
+        industry_tags = []
+        if info.get('sector'):
+            industry_tags.append(info['sector'])
+        if info.get('industry') and info['industry'] != info.get('sector'):
+            industry_tags.append(info['industry'])
+        
+        # 本社所在地を作成
+        headquarters = None
+        city = info.get('city', '')
+        state = info.get('state', '')
+        country = info.get('country', '')
+        
+        if symbol.endswith('.T'):
+            # 日本株の場合
+            if city and state:
+                headquarters = f"{state}{city}"
+            elif city:
+                headquarters = city
+            elif country:
+                headquarters = country
+        else:
+            # 米国株の場合
+            if city and state:
+                headquarters = f"{city}, {state}"
+            elif city and country:
+                headquarters = f"{city}, {country}"
+            elif state:
+                headquarters = state
+            elif country:
+                headquarters = country
+        
+        # 設立年の推定（IPO年からの推定）
+        foundation_year = None
+        # yfinanceには直接的な設立年フィールドがないため、主要企業の設立年をマッピング
+        known_foundation_years = {
+            'AAPL': 1976,
+            'MSFT': 1975,
+            'GOOGL': 1998,
+            'AMZN': 1994,
+            'TSLA': 2003,
+            'META': 2004,
+            'NFLX': 1997,
+            '7203.T': 1937,  # トヨタ自動車
+            '6758.T': 1946,  # ソニーグループ
+            '7974.T': 1889,  # 任天堂
+            '9432.T': 1952,  # NTT
+            '9984.T': 1981,  # ソフトバンクグループ
+        }
+        foundation_year = known_foundation_years.get(symbol)
+        
+        return {
+            "company_name": company_name,
+            "logo_url": logo_url,
+            "website": info.get('website'),
+            "market_cap_formatted": market_cap_formatted,
+            "business_summary": info.get('longBusinessSummary'),
+            "industry_tags": industry_tags,
+            "full_time_employees": info.get('fullTimeEmployees'),
+            "foundation_year": foundation_year,
+            "headquarters": headquarters
+        }
+        
+    except Exception as e:
+        print(f"企業プロフィール情報の取得中にエラーが発生しました（{symbol}）: {e}")
+        # エラー時でも基本的な情報は返す
+        return {
+            "company_name": symbol,
+            "logo_url": LOGO_URLS.get(symbol),
+            "website": None,
+            "market_cap_formatted": None,
+            "business_summary": None,
+            "industry_tags": [],
+            "full_time_employees": None,
+            "foundation_year": None,
+            "headquarters": None
+        }
+
+def get_dividend_history(symbol: str, years: int = 8):
+    """
+    配当履歴を取得する関数
+    
+    Args:
+        symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
+        years: 取得する年数
+        
+    Returns:
+        List[Dict]: 配当履歴データ
+    """
+    try:
+        ticker = yf.Ticker(symbol)
+        
+        # yfinanceから配当履歴を取得
+        dividends = ticker.dividends
+        
+        if dividends.empty:
+            print(f"銘柄 {symbol} の配当履歴が見つかりません")
+            return []
+        
+        # 通貨記号を決定
+        currency_symbol = "¥" if symbol.endswith('.T') else "$"
+        
+        # 年度別に配当を集計
+        dividend_by_year = {}
+        
+        for date_idx, dividend_amount in dividends.items():
+            # 日本株の場合は会計年度（3月期）に合わせる
+            if symbol.endswith('.T'):
+                # 3月期の会計年度を計算
+                if date_idx.month >= 4:  # 4月〜翌年3月
+                    fiscal_year = date_idx.year + 1
+                else:
+                    fiscal_year = date_idx.year
+                fiscal_year_str = f"{fiscal_year}年3月期"
+            else:
+                # 米国株は暦年
+                fiscal_year = date_idx.year
+                fiscal_year_str = f"{fiscal_year}年"
+            
+            # 四半期を計算
+            quarter_num = ((date_idx.month - 1) // 3) + 1
+            quarter_str = f"第{quarter_num}四半期"
+            
+            if fiscal_year_str not in dividend_by_year:
+                dividend_by_year[fiscal_year_str] = {
+                    'total': 0,
+                    'quarters': {},
+                    'dates': []
+                }
+            
+            dividend_by_year[fiscal_year_str]['total'] += dividend_amount
+            dividend_by_year[fiscal_year_str]['quarters'][quarter_str] = dividend_amount
+            dividend_by_year[fiscal_year_str]['dates'].append(date_idx.date())
+        
+        # 結果を配当履歴形式に変換
+        dividend_history = []
+        
+        # 年度を降順でソート（最新年度が最初）
+        sorted_years = sorted(dividend_by_year.keys(), reverse=True)
+        
+        # 指定された年数まで取得
+        for fiscal_year in sorted_years[:years]:
+            year_data = dividend_by_year[fiscal_year]
+            
+            # 四半期配当リストを作成
+            quarterly_dividends = []
+            for quarter in ["第1四半期", "第2四半期", "第3四半期", "第4四半期"]:
+                if quarter in year_data['quarters']:
+                    amount = year_data['quarters'][quarter]
+                    quarterly_dividends.append({
+                        "quarter": quarter,
+                        "amount": f"{currency_symbol}{amount:.2f}"
+                    })
+                else:
+                    # 配当がない四半期は"---"で表示
+                    quarterly_dividends.append({
+                        "quarter": quarter,
+                        "amount": None
+                    })
+            
+            # 発表日（最初の配当支払日を使用）
+            announcement_date = min(year_data['dates']) if year_data['dates'] else None
+            
+            # 予想/実績の判定（未来の年度は予想とする）
+            current_year = datetime.now().year
+            is_forecast = False
+            
+            if symbol.endswith('.T'):
+                # 日本株：現在年+1以降は予想
+                fiscal_year_num = int(fiscal_year.replace('年3月期', ''))
+                is_forecast = fiscal_year_num > current_year + 1
+            else:
+                # 米国株：現在年以降は予想
+                fiscal_year_num = int(fiscal_year.replace('年', ''))
+                is_forecast = fiscal_year_num > current_year
+            
+            dividend_history.append({
+                "fiscal_year": fiscal_year,
+                "total_dividend": f"{currency_symbol}{year_data['total']:.2f}",
+                "is_forecast": is_forecast,
+                "quarterly_dividends": quarterly_dividends,
+                "announcement_date": announcement_date
+            })
+        
+        return dividend_history
+        
+    except Exception as e:
+        print(f"配当履歴の取得中にエラーが発生しました（{symbol}）: {e}")
+        return []
