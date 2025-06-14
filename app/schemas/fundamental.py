@@ -32,6 +32,19 @@ class DividendData(BaseModel):
     ex_dividend_date: Optional[date] = Field(None, description="権利落ち日")
     next_payment_date: Optional[date] = Field(None, description="次回支払日")
 
+class QuarterlyDividend(BaseModel):
+    """四半期配当情報モデル"""
+    quarter: str = Field(..., description="四半期（例：第1四半期、第2四半期）")
+    amount: Optional[str] = Field(None, description="配当金額")
+
+class DividendHistory(BaseModel):
+    """配当履歴モデル"""
+    fiscal_year: str = Field(..., description="会計年度（例：2024年3月期）")
+    total_dividend: str = Field(..., description="年間配当金額（調整後）")
+    is_forecast: bool = Field(False, description="予想値かどうか")
+    quarterly_dividends: List[QuarterlyDividend] = Field([], description="四半期別配当金")
+    announcement_date: Optional[date] = Field(None, description="配当発表日")
+
 class ValuationGrowth(BaseModel):
     """成長性指標モデル"""
     revenue_growth: Optional[str] = Field(None, description="売上高成長率（前年比）")
@@ -46,4 +59,5 @@ class FundamentalData(BaseModel):
     quarterly_earnings: List[QuarterlyEarning] = Field([], description="四半期業績推移")
     key_metrics: KeyMetrics = Field(..., description="主要指標")
     dividend_data: Optional[DividendData] = Field(None, description="配当情報")
+    dividend_history: List[DividendHistory] = Field([], description="配当履歴")
     valuation_growth: Optional[ValuationGrowth] = Field(None, description="成長性指標") 
