@@ -1237,9 +1237,21 @@ def get_fundamental_data(symbol: str):
                     # 次回支払日は推定（通常は権利落ち日の数週間後）
                     next_payment = ex_date + timedelta(days=30)
             
+            # 配当利回りの処理（yfinanceのdividendYieldは既に小数形式）
+            dividend_yield_value = info.get('dividendYield', 0)
+            if dividend_yield_value > 0:
+                # dividendYieldが1未満の場合は小数形式（0.0372 = 3.72%）
+                if dividend_yield_value < 1:
+                    dividend_yield_formatted = f"{dividend_yield_value * 100:.2f}%"
+                else:
+                    # 既にパーセント形式の場合（稀だが念のため）
+                    dividend_yield_formatted = f"{dividend_yield_value:.2f}%"
+            else:
+                dividend_yield_formatted = "0.00%"
+            
             dividend_data = {
                 "dividend": f"{currency_symbol}{info.get('dividendRate', 0):.2f}",
-                "dividend_yield": f"{info.get('dividendYield', 0) * 100:.2f}%",
+                "dividend_yield": dividend_yield_formatted,
                 "payout_ratio": f"{info.get('payoutRatio', 0) * 100:.1f}%" if info.get('payoutRatio') else None,
                 "ex_dividend_date": ex_date,
                 "next_payment_date": next_payment
