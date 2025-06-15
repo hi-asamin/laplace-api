@@ -851,6 +851,57 @@ def calculate_dividend_yield(symbol: str, info: dict) -> Optional[str]:
         print(f"Error calculating dividend yield for {symbol}: {e}")
         return None
 
+def convert_index_symbol(symbol: str) -> str:
+    """
+    指数シンボルをyfinance形式に変換する関数
+    
+    Args:
+        symbol: ユーザー入力の指数シンボル
+        
+    Returns:
+        str: yfinance形式の指数シンボル
+    """
+    # 主要指数のシンボル変換マッピング
+    index_mapping = {
+        # S&P 500
+        "SPX": "^GSPC",
+        "SP500": "^GSPC", 
+        "^SPX": "^GSPC",
+        
+        # NASDAQ
+        "NASDAQ": "^IXIC",
+        "NDX": "^NDX",
+        "COMP": "^IXIC",
+        
+        # Dow Jones
+        "DJI": "^DJI",
+        "DJIA": "^DJI",
+        "DOW": "^DJI",
+        
+        # Russell
+        "RUT": "^RUT",
+        "RUSSELL2000": "^RUT",
+        
+        # VIX
+        "VIX": "^VIX",
+        
+        # 日本の指数
+        "NIKKEI": "^N225",
+        "N225": "^N225",
+        "TOPIX": "^TOPX",
+        
+        # ヨーロッパの指数
+        "DAX": "^GDAXI",
+        "FTSE": "^FTSE",
+        "CAC": "^FCHI",
+        
+        # アジアの指数
+        "HSI": "^HSI",  # ハンセン指数
+        "STI": "^STI",  # シンガポール
+    }
+    
+    return index_mapping.get(symbol.upper(), symbol)
+
 def is_index_symbol(symbol: str) -> bool:
     """
     シンボルが指数かどうかを判別する関数
@@ -861,6 +912,13 @@ def is_index_symbol(symbol: str) -> bool:
     Returns:
         bool: 指数の場合True
     """
+    # 指数シンボル変換を試行
+    converted_symbol = convert_index_symbol(symbol)
+    
+    # 変換されたシンボルが^で始まる場合は指数
+    if converted_symbol.startswith('^'):
+        return True
+    
     # 一般的な指数シンボルのパターン
     index_patterns = [
         '^',  # Yahoo Finance指数プレフィックス
@@ -979,7 +1037,7 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
     チャートデータを取得する関数
     
     Args:
-        symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
+        symbol: 銘柄シンボル (例: 'AAPL', '7203.T', 'SPX')
         period: データ期間 (1D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y, 10Y, ALL)
         interval: データ間隔 (1m, 5m, 15m, 30m, 60m, 1D, 1W, 1M)
         
@@ -987,6 +1045,13 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
         dict: チャートデータ
     """
     try:
+        # 指数シンボルをyfinance形式に変換
+        yf_symbol = convert_index_symbol(symbol)
+        
+        # デバッグ情報（指数の場合のみ）
+        if yf_symbol != symbol:
+            print(f"Index symbol conversion: {symbol} → {yf_symbol}")
+        
         # 期間とインターバルをyfinance形式に変換
         period_mapping = {
             "1D": "1d", "1W": "5d", "1M": "1mo",
@@ -1008,8 +1073,8 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
         yf_period = period_mapping.get(period, "3mo")
         yf_interval = interval_mapping.get(interval, "1d")
         
-        # データ取得
-        ticker = yf.Ticker(symbol)
+        # データ取得（変換されたシンボルを使用）
+        ticker = yf.Ticker(yf_symbol)
         data = ticker.history(period=yf_period, interval=yf_interval)
         
         # データが空または少ない場合の対応
@@ -1040,7 +1105,13 @@ def get_chart_data(symbol: str, period: str = "3M", interval: str = "1D"):
             "data": chart_data
         }
     except Exception as e:
-        print(f"Error fetching chart data for {symbol}: {e}")
+        # 指数シンボル変換情報を含むエラーメッセージ
+        yf_symbol = convert_index_symbol(symbol)
+        error_msg = f"Error fetching chart data for {symbol}"
+        if yf_symbol != symbol:
+            error_msg += f" (converted to {yf_symbol})"
+        error_msg += f": {e}"
+        print(error_msg)
         raise ValueError(f"Failed to fetch chart data for {symbol}")
 
 def get_fundamental_data(symbol: str):
