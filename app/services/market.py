@@ -19,6 +19,36 @@ from typing import List, Dict, Any, Optional
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
 JPX_DATA_FILE = Path(__file__).parent / "data.csv"  # .xlsから.csvに変更
 
+# 人気度データ（取引量、時価総額、知名度などを考慮したスコア）
+POPULARITY_SCORES = {
+    # 米国株（人気順）
+    "AAPL": 100, "MSFT": 95, "GOOGL": 90, "AMZN": 88, "TSLA": 85,
+    "META": 82, "NVDA": 80, "NFLX": 75, "PYPL": 70, "ADBE": 68,
+    "CRM": 65, "ORCL": 62, "IBM": 60, "INTC": 58, "AMD": 55,
+    "DIS": 52, "SBUX": 50, "SHOP": 48, "ABNB": 45, "UBER": 42,
+    "LYFT": 40, "SNAP": 38, "COIN": 35, "SQ": 32, "ZM": 30,
+    "TSM": 28, "PINS": 25, "RBLX": 22, "ARM": 20,
+    
+    # 米国ETF（人気順）
+    "SPY": 100, "QQQ": 95, "VTI": 90, "VOO": 85, "IWM": 80,
+    "VEA": 75, "VWO": 70, "GLD": 65, "TLT": 60, "EFA": 55,
+    "IEFA": 50, "VTV": 45, "VUG": 40, "VXUS": 35, "BND": 30,
+    
+    # 米国指数（人気順）
+    "^GSPC": 100, "^IXIC": 95, "^DJI": 90, "^RUT": 85, "^VIX": 80,
+    "^NDX": 75, "^FTSE": 70, "^GDAXI": 65, "^FCHI": 60,
+    
+    # 日本株（人気順）
+    "7203.T": 100, "6758.T": 95, "7974.T": 90, "7267.T": 85, "6752.T": 80,
+    "7751.T": 75, "6501.T": 70, "6701.T": 65, "6702.T": 60, "9433.T": 55,
+    "9432.T": 50, "9984.T": 45, "8058.T": 40, "8031.T": 35, "8053.T": 30,
+    "2914.T": 28, "4502.T": 25, "6367.T": 22, "9983.T": 20, "4755.T": 18,
+    "4689.T": 15, "9201.T": 12, "9202.T": 10, "6902.T": 8, "6645.T": 5,
+    
+    # 日本指数（人気順）
+    "^N225": 100, "^TOPX": 90,
+}
+
 # 主要企業のロゴURLを定義
 LOGO_URLS = {
   "AAPL": "https://logo.clearbit.com/apple.com",
@@ -82,6 +112,7 @@ LOGO_URLS = {
 
 # 静的銘柄データ（曖昧検索用）
 INITIAL_TICKERS = [
+    # 米国株
     {"Symbol": "AAPL", "Name": "Apple Inc.", "Market": "US"},
     {"Symbol": "MSFT", "Name": "Microsoft Corporation", "Market": "US"},
     {"Symbol": "GOOGL", "Name": "Alphabet Inc.", "Market": "US"},
@@ -97,9 +128,30 @@ INITIAL_TICKERS = [
     {"Symbol": "IBM", "Name": "International Business Machines Corporation", "Market": "US"},
     {"Symbol": "INTC", "Name": "Intel Corporation", "Market": "US"},
     {"Symbol": "AMD", "Name": "Advanced Micro Devices Inc.", "Market": "US"},
+    
+    # 米国ETF
     {"Symbol": "SPY", "Name": "SPDR S&P 500 ETF Trust", "Market": "US"},
     {"Symbol": "QQQ", "Name": "Invesco QQQ Trust", "Market": "US"},
     {"Symbol": "VTI", "Name": "Vanguard Total Stock Market ETF", "Market": "US"},
+    {"Symbol": "VOO", "Name": "Vanguard S&P 500 ETF", "Market": "US"},
+    {"Symbol": "IWM", "Name": "iShares Russell 2000 ETF", "Market": "US"},
+    {"Symbol": "VEA", "Name": "Vanguard FTSE Developed Markets ETF", "Market": "US"},
+    {"Symbol": "VWO", "Name": "Vanguard FTSE Emerging Markets ETF", "Market": "US"},
+    {"Symbol": "GLD", "Name": "SPDR Gold Shares", "Market": "US"},
+    {"Symbol": "TLT", "Name": "iShares 20+ Year Treasury Bond ETF", "Market": "US"},
+    {"Symbol": "EFA", "Name": "iShares MSCI EAFE ETF", "Market": "US"},
+    
+    # 米国指数
+    {"Symbol": "^GSPC", "Name": "S&P 500", "Market": "US"},
+    {"Symbol": "^IXIC", "Name": "NASDAQ Composite", "Market": "US"},
+    {"Symbol": "^DJI", "Name": "Dow Jones Industrial Average", "Market": "US"},
+    {"Symbol": "^RUT", "Name": "Russell 2000", "Market": "US"},
+    {"Symbol": "^VIX", "Name": "CBOE Volatility Index", "Market": "US"},
+    {"Symbol": "^NDX", "Name": "NASDAQ-100", "Market": "US"},
+    
+    # 日本指数
+    {"Symbol": "^N225", "Name": "日経平均株価", "Market": "Japan"},
+    {"Symbol": "^TOPX", "Name": "東証株価指数", "Market": "Japan"},
 ]
 
 JAPAN_TICKERS = [
@@ -919,25 +971,59 @@ def is_index_symbol(symbol: str) -> bool:
     if converted_symbol.startswith('^'):
         return True
     
-    # 一般的な指数シンボルのパターン
-    index_patterns = [
-        '^',  # Yahoo Finance指数プレフィックス
-        'SPY', 'QQQ', 'IWM',  # 主要ETF
-        'VOO', 'VTI', 'VEA',  # Vanguard ETF
-    ]
-    
-    symbol_upper = symbol.upper()
-    
     # プレフィックスチェック
     if symbol.startswith('^'):
         return True
     
-    # 主要指数ETFチェック
-    for pattern in index_patterns[1:]:  # '^'以外をチェック
-        if symbol_upper.startswith(pattern):
+    return False
+
+def is_etf_symbol(symbol: str) -> bool:
+    """
+    シンボルがETFかどうかを判別する関数
+    
+    Args:
+        symbol: 銘柄シンボル
+        
+    Returns:
+        bool: ETFの場合True
+    """
+    # 主要ETFのパターン
+    etf_patterns = [
+        'SPY', 'QQQ', 'IWM', 'VOO', 'VTI', 'VEA', 'VWO', 'GLD', 'TLT', 'EFA',
+        'IEFA', 'VTV', 'VUG', 'VXUS', 'BND', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI',
+        'XLP', 'XLY', 'XLU', 'XLRE', 'XLB', 'VIG', 'SCHD', 'DGRO', 'HDV', 'NOBL'
+    ]
+    
+    symbol_upper = symbol.upper()
+    
+    # 主要ETFチェック
+    if symbol_upper in etf_patterns:
+        return True
+    
+    # ETFの一般的な命名パターン
+    etf_suffixes = ['ETF', 'FUND']
+    for suffix in etf_suffixes:
+        if symbol_upper.endswith(suffix):
             return True
     
     return False
+
+def get_asset_type(symbol: str) -> AssetType:
+    """
+    シンボルからアセットタイプを判定する関数
+    
+    Args:
+        symbol: 銘柄シンボル
+        
+    Returns:
+        AssetType: 判定されたアセットタイプ
+    """
+    if is_index_symbol(symbol):
+        return AssetType.INDEX
+    elif is_etf_symbol(symbol):
+        return AssetType.ETF
+    else:
+        return AssetType.STOCK
 
 def get_market_details(symbol: str):
     """
@@ -1397,113 +1483,325 @@ def get_fundamental_data(symbol: str):
 @lru_cache(maxsize=1024)
 def get_related_markets(symbol: str, limit: int = 5):
     """
-    関連銘柄を取得する関数
+    関連銘柄を取得する関数（アセットタイプ対応版）
+    
+    株式: 同じ業界の銘柄
+    ETF: 他のETF
+    指数: 他の指数
     
     Args:
-        symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
-        limit: 返却する結果の最大数
+        symbol: 銘柄シンボル
+        limit: 取得する関連銘柄数
         
     Returns:
-        dict: 関連銘柄のリスト
+        dict: 関連銘柄のリスト（人気度順）
     """
     try:
-        # シンボルから市場とセクターを判断
-        is_japan_stock = symbol.endswith('.T')
-        market = "Japan" if is_japan_stock else "US"
+        # アセットタイプを判定
+        asset_type = get_asset_type(symbol)
         
-        # 基本情報を取得（キャッシュ済みの関数を使用）
-        company_info = get_company_info(symbol)
-        sector = company_info.get('sector', '')
-        
-        # 同一セクターの銘柄を取得（キャッシュ済みの関数を使用）
+        # データフレームを取得
         df = load_ticker_master()
-        
-        # セクター情報がない場合は空のリストを返す
-        if not sector or len(df) == 0:
+        if df is None or len(df) == 0:
             return {"items": []}
         
-        # 同一市場、同一セクターで異なる銘柄を抽出
-        if 'Sector' in df.columns:
-            sector_matches = df[(df['Market'] == market) & 
-                               (df['Sector'].str.lower() == sector.lower()) & 
-                               (df['Symbol'] != symbol)]
-        else:
-            # セクター情報がない場合は同一市場の銘柄をランダムに抽出
-            sector_matches = df[(df['Market'] == market) & 
-                               (df['Symbol'] != symbol)]
+        # 欠損値を処理
+        df = df.fillna('')
         
-        # 十分な銘柄がない場合はランダムな銘柄で補完
-        if len(sector_matches) < limit:
-            other_matches = df[(df['Market'] == market) & 
-                             (df['Symbol'] != symbol)]
-            if 'Sector' in df.columns:
-                other_matches = other_matches[other_matches['Sector'].str.lower() != sector.lower()]
-            
-            # 不足分をランダムに追加
-            if len(other_matches) > 0:
-                random_sample = other_matches.sample(min(limit - len(sector_matches), len(other_matches)))
-                sector_matches = pd.concat([sector_matches, random_sample])
+        # 市場区分が設定されているか確認
+        if 'Market' not in df.columns:
+            df['Market'] = df['Symbol'].apply(lambda x: 'Japan' if str(x).endswith('.T') else 'US')
+        
+        related_symbols = pd.DataFrame()
+        
+        if asset_type == AssetType.STOCK:
+            # 株式の場合：同じ業界の銘柄を取得
+            related_symbols = _get_related_stocks(symbol, df, limit)
+        elif asset_type == AssetType.ETF:
+            # ETFの場合：他のETFを取得
+            related_symbols = _get_related_etfs(symbol, df, limit)
+        elif asset_type == AssetType.INDEX:
+            # 指数の場合：他の指数を取得
+            related_symbols = _get_related_indices(symbol, df, limit)
+        
+        # 人気度順にソート
+        if not related_symbols.empty:
+            related_symbols = related_symbols.copy()  # 警告を避けるためにコピーを作成
+            related_symbols['popularity'] = related_symbols['Symbol'].apply(
+                lambda x: POPULARITY_SCORES.get(x, 0)
+            )
+            related_symbols = related_symbols.sort_values('popularity', ascending=False)
         
         # 結果を制限
-        related_symbols = sector_matches.head(limit)
+        related_symbols = related_symbols.head(limit)
         
-        # 関連銘柄のリストを作成
+        # 関連銘柄のリストを作成（並行処理で最適化）
         items = []
-        for _, row in related_symbols.iterrows():
-            rel_symbol = row['Symbol']
+        
+        # バッチで価格情報を取得（並行処理）
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        def get_symbol_data(rel_symbol, name):
             try:
-                # 価格情報を取得（キャッシュ済みの関数を使用）
+                # 価格情報を取得
                 price_info = get_stock_price(rel_symbol)
                 
-                # 前日比の数値を計算
-                currency_symbol = "¥" if rel_symbol.endswith('.T') else "$"
-                change_percent = price_info["change_percent"]
-                latest_price = price_info["price"]
-                
-                try:
-                    latest_price_value = float(latest_price.replace(currency_symbol, "").replace(",", ""))
-                    change_percent_value = float(change_percent.replace("%", "").replace("+", ""))
-                    change_value = (latest_price_value * change_percent_value / 100)
-                    change = f"{'+' if change_percent_value > 0 else ''}{currency_symbol}{change_value:.2f}"
-                    is_positive = change_percent_value > 0
-                except:
-                    change = "+0.00" if "+" in change_percent else "-0.00"
-                    is_positive = "+" in change_percent
-                
-                # 企業情報を取得（キャッシュ済みの関数を使用）
-                rel_company_info = get_company_info(rel_symbol)
-                
-                # ロゴURLを取得
+                # ロゴURLを取得（事前定義のみ、動的取得は行わない）
                 logo_url = LOGO_URLS.get(rel_symbol)
                 
-                # 事前定義したロゴがない場合はClearbitから取得（企業ドメインがあれば）
-                if not logo_url and rel_company_info.get('website'):
-                    domain = rel_company_info['website'].replace('https://', '').replace('http://', '').split('/')[0]
-                    logo_url = f"https://logo.clearbit.com/{domain}"
-                
-                # 関連タイプ（同一セクター）
-                relation_type = "competitor"
-                
-                # アイテムを追加
-                items.append({
+                return {
                     "symbol": rel_symbol,
-                    "name": row.get('Name', rel_company_info.get('name', rel_symbol)),
+                    "name": name,
                     "price": price_info["price"],
-                    "change": change,
                     "change_percent": price_info["change_percent"],
-                    "is_positive": is_positive,
-                    "logo_url": logo_url,
-                    "relation_type": relation_type,
-                    "sector": rel_company_info.get('sector', None)
-                })
+                    "logo_url": logo_url
+                }
             except Exception as e:
-                print(f"Error processing related symbol {rel_symbol}: {e}")
-                continue
+                return None
+        
+        # 並行処理で価格データを取得
+        if len(related_symbols) > 0:
+            max_workers = min(len(related_symbols), 5)
+            if max_workers > 0:
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(get_symbol_data, row['Symbol'], row.get('Name', row['Symbol'])): row['Symbol'] 
+                        for _, row in related_symbols.iterrows()
+                    }
+                    
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result:
+                            items.append(result)
         
         return {"items": items}
     except Exception as e:
         print(f"Error fetching related markets for {symbol}: {e}")
         return {"items": []}
+
+def _get_related_stocks(symbol: str, df: pd.DataFrame, limit: int) -> pd.DataFrame:
+    """
+    株式の関連銘柄を取得（同じ業界）
+    """
+    try:
+        # 銘柄情報を取得
+        company_info = get_company_info(symbol)
+        sector = company_info.get('sector')
+        market = company_info.get('market')
+    except Exception as e:
+        print(f"Error getting company info for {symbol}: {e}")
+        sector = None
+        market = None
+    
+    # 日本株かどうかを判定
+    is_japan_stock = symbol.endswith('.T')
+    if not market:
+        market = 'Japan' if is_japan_stock else 'US'
+    
+    # セクター情報に基づいて関連銘柄を検索
+    sector_matches = pd.DataFrame()
+    
+    if 'Sector' in df.columns and sector:
+        if is_japan_stock:
+            # 日本株の場合は、DataFrameのセクター情報（日本語）を使用
+            # まず対象銘柄のDataFrame上のセクター情報を取得
+            target_df_info = df[df['Symbol'] == symbol]
+            if not target_df_info.empty:
+                df_sector = target_df_info.iloc[0]['Sector']
+                if market:
+                    sector_matches = df[(df['Market'] == market) & 
+                                       (df['Sector'] == df_sector) & 
+                                       (df['Symbol'] != symbol)]
+                else:
+                    # 日本の全市場を対象
+                    sector_matches = df[df['Symbol'].str.endswith('.T') & 
+                                       (df['Sector'] == df_sector) & 
+                                       (df['Symbol'] != symbol)]
+        else:
+            # 米国株の場合は、APIのセクター情報（英語）を使用
+            sector_matches = df[(df['Market'] == market) & 
+                               (df['Sector'].str.lower() == sector.lower()) & 
+                               (df['Symbol'] != symbol)]
+    
+    # セクター情報がない、または十分な銘柄がない場合は同一市場の人気銘柄で補完
+    if len(sector_matches) < limit:
+        if is_japan_stock:
+            # 日本株の人気銘柄
+            popular_japan_stocks = [
+                '7203.T', '6758.T', '7974.T', '7267.T', '6752.T', '7751.T', 
+                '6501.T', '6701.T', '6702.T', '9433.T', '9432.T', '9984.T'
+            ]
+            # 対象銘柄を除外
+            related_stocks = [s for s in popular_japan_stocks if s != symbol]
+            
+            # DataFrameから該当する銘柄を抽出
+            market_matches = df[df['Symbol'].isin(related_stocks)]
+            
+            # 見つからない場合は、同一市場の銘柄をランダムに抽出
+            if market_matches.empty:
+                if market:
+                    market_matches = df[(df['Market'] == market) & (df['Symbol'] != symbol)]
+                else:
+                    market_matches = df[df['Symbol'].str.endswith('.T') & (df['Symbol'] != symbol)]
+        else:
+            # 米国株の人気銘柄
+            popular_us_stocks = [
+                'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'TSLA', 'META', 'NVDA', 
+                'NFLX', 'PYPL', 'ADBE', 'CRM', 'ORCL', 'IBM', 'INTC', 'AMD'
+            ]
+            # 対象銘柄を除外
+            related_stocks = [s for s in popular_us_stocks if s != symbol]
+            
+            # DataFrameから該当する銘柄を抽出
+            market_matches = df[df['Symbol'].isin(related_stocks)]
+            
+            # 見つからない場合は、同一市場の銘柄をランダムに抽出
+            if market_matches.empty:
+                market_matches = df[(df['Market'] == market) & (df['Symbol'] != symbol)]
+        
+        # セクターマッチと市場マッチを結合
+        if sector_matches.empty:
+            sector_matches = market_matches
+        else:
+            # 不足分を市場マッチから追加
+            remaining_needed = limit - len(sector_matches)
+            if remaining_needed > 0 and not market_matches.empty:
+                # 既存のセクターマッチに含まれていない銘柄のみ追加
+                existing_symbols = set(sector_matches['Symbol'].tolist())
+                additional_matches = market_matches[~market_matches['Symbol'].isin(existing_symbols)]
+                if not additional_matches.empty:
+                    additional_sample = additional_matches.head(remaining_needed)
+                    sector_matches = pd.concat([sector_matches, additional_sample])
+    
+    return sector_matches
+
+def _get_related_etfs(symbol: str, df: pd.DataFrame, limit: int) -> pd.DataFrame:
+    """
+    ETFの関連銘柄を取得（他のETF）
+    """
+    # 人気ETFリスト（優先順位付き）
+    popular_etfs = [
+        'SPY', 'QQQ', 'VTI', 'VOO', 'IWM', 'VEA', 'VWO', 'GLD', 'TLT', 'EFA',
+        'IEFA', 'VTV', 'VUG', 'VXUS', 'BND', 'XLF', 'XLK', 'XLE', 'XLV', 'XLI',
+        'XLP', 'XLY', 'XLU', 'XLRE', 'XLB', 'VIG', 'SCHD', 'DGRO', 'HDV', 'NOBL'
+    ]
+    
+    # 対象銘柄を除外
+    related_etfs = [etf for etf in popular_etfs if etf != symbol.upper()]
+    
+    # DataFrameから該当するETFを抽出
+    etf_matches = df[df['Symbol'].isin(related_etfs)]
+    
+    # 見つからない場合は、静的データから作成
+    if etf_matches.empty or len(etf_matches) < limit:
+        # 静的データからETFを作成
+        static_etfs = []
+        for etf_symbol in related_etfs[:limit * 2]:  # 余裕を持って取得
+            static_etfs.append({
+                'Symbol': etf_symbol,
+                'Name': _get_etf_name(etf_symbol),
+                'Market': 'US'
+            })
+        
+        static_df = pd.DataFrame(static_etfs)
+        if etf_matches.empty:
+            etf_matches = static_df
+        else:
+            # 既存の結果と結合
+            etf_matches = pd.concat([etf_matches, static_df]).drop_duplicates(subset=['Symbol'])
+    
+    return etf_matches
+
+def _get_etf_name(symbol: str) -> str:
+    """ETFの名前を取得"""
+    etf_names = {
+        'SPY': 'SPDR S&P 500 ETF Trust',
+        'QQQ': 'Invesco QQQ Trust',
+        'VTI': 'Vanguard Total Stock Market ETF',
+        'VOO': 'Vanguard S&P 500 ETF',
+        'IWM': 'iShares Russell 2000 ETF',
+        'VEA': 'Vanguard FTSE Developed Markets ETF',
+        'VWO': 'Vanguard FTSE Emerging Markets ETF',
+        'GLD': 'SPDR Gold Shares',
+        'TLT': 'iShares 20+ Year Treasury Bond ETF',
+        'EFA': 'iShares MSCI EAFE ETF',
+        'IEFA': 'iShares Core MSCI EAFE IMI Index ETF',
+        'VTV': 'Vanguard Value ETF',
+        'VUG': 'Vanguard Growth ETF',
+        'VXUS': 'Vanguard Total International Stock ETF',
+        'BND': 'Vanguard Total Bond Market ETF',
+        'XLF': 'Financial Select Sector SPDR Fund',
+        'XLK': 'Technology Select Sector SPDR Fund',
+        'XLE': 'Energy Select Sector SPDR Fund',
+        'XLV': 'Health Care Select Sector SPDR Fund',
+        'XLI': 'Industrial Select Sector SPDR Fund',
+        'XLP': 'Consumer Staples Select Sector SPDR Fund',
+        'XLY': 'Consumer Discretionary Select Sector SPDR Fund',
+        'XLU': 'Utilities Select Sector SPDR Fund',
+        'XLRE': 'Real Estate Select Sector SPDR Fund',
+        'XLB': 'Materials Select Sector SPDR Fund',
+        'VIG': 'Vanguard Dividend Appreciation ETF',
+        'SCHD': 'Schwab US Dividend Equity ETF',
+        'DGRO': 'iShares Core Dividend Growth ETF',
+        'HDV': 'iShares High Dividend ETF',
+        'NOBL': 'ProShares S&P 500 Dividend Aristocrats ETF'
+    }
+    return etf_names.get(symbol, f"{symbol} ETF")
+
+def _get_related_indices(symbol: str, df: pd.DataFrame, limit: int) -> pd.DataFrame:
+    """
+    指数の関連銘柄を取得（他の指数）
+    """
+    # 人気指数リスト（優先順位付き）
+    popular_indices = [
+        '^GSPC', '^IXIC', '^DJI', '^RUT', '^VIX', '^NDX', 
+        '^N225', '^TOPX', '^FTSE', '^GDAXI', '^FCHI', '^HSI', '^STI'
+    ]
+    
+    # 対象銘柄を除外
+    related_indices = [idx for idx in popular_indices if idx != symbol]
+    
+    # DataFrameから該当する指数を抽出
+    index_matches = df[df['Symbol'].isin(related_indices)]
+    
+    # 見つからない場合は、静的データから作成
+    if index_matches.empty or len(index_matches) < limit:
+        # 静的データから指数を作成
+        static_indices = []
+        for index_symbol in related_indices[:limit * 2]:  # 余裕を持って取得
+            static_indices.append({
+                'Symbol': index_symbol,
+                'Name': _get_index_name(index_symbol),
+                'Market': 'Japan' if index_symbol in ['^N225', '^TOPX'] else 'US'
+            })
+        
+        static_df = pd.DataFrame(static_indices)
+        if index_matches.empty:
+            index_matches = static_df
+        else:
+            # 既存の結果と結合
+            index_matches = pd.concat([index_matches, static_df]).drop_duplicates(subset=['Symbol'])
+    
+    return index_matches
+
+def _get_index_name(symbol: str) -> str:
+    """指数の名前を取得"""
+    index_names = {
+        '^GSPC': 'S&P 500',
+        '^IXIC': 'NASDAQ Composite',
+        '^DJI': 'Dow Jones Industrial Average',
+        '^RUT': 'Russell 2000',
+        '^VIX': 'CBOE Volatility Index',
+        '^NDX': 'NASDAQ-100',
+        '^N225': '日経平均株価',
+        '^TOPX': '東証株価指数',
+        '^FTSE': 'FTSE 100',
+        '^GDAXI': 'DAX',
+        '^FCHI': 'CAC 40',
+        '^HSI': 'Hang Seng Index',
+        '^STI': 'Straits Times Index'
+    }
+    return index_names.get(symbol, symbol.replace('^', '') + ' Index')
 
 def load_jpx_data():
     """
