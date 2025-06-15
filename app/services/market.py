@@ -2156,14 +2156,16 @@ def get_dividend_history(symbol: str, years: int = None):
         dividend_by_year = {}
         
         for date_idx, dividend_amount in dividends.items():
-            # 日本株の場合は会計年度（3月期）に合わせる
+            # 日本株の場合は会計年度（3月期）に合わせるが、表記はアメリカ株と統一
             if symbol.endswith('.T'):
                 # 3月期の会計年度を計算
                 if date_idx.month >= 4:  # 4月〜翌年3月
                     fiscal_year = date_idx.year + 1
                 else:
                     fiscal_year = date_idx.year
-                fiscal_year_str = f"{fiscal_year}年3月期"
+                # アメリカ株と同じ表記にするため、会計年度から1を引く
+                display_year = fiscal_year - 1
+                fiscal_year_str = f"{display_year}年"
             else:
                 # 米国株は暦年
                 fiscal_year = date_idx.year
@@ -2183,6 +2185,38 @@ def get_dividend_history(symbol: str, years: int = None):
             dividend_by_year[fiscal_year_str]['total'] += dividend_amount
             dividend_by_year[fiscal_year_str]['quarters'][quarter_str] = dividend_amount
             dividend_by_year[fiscal_year_str]['dates'].append(date_idx.date())
+        
+        # 日本株の場合、現在進行中の会計年度の予想配当データを追加
+        if symbol.endswith('.T'):
+            current_date = datetime.now()
+            
+            # 現在の会計年度を計算
+            if current_date.month >= 4:  # 4月〜翌年3月
+                current_fiscal_year = current_date.year + 1
+            else:
+                current_fiscal_year = current_date.year
+            # アメリカ株と同じ表記にするため、会計年度から1を引く
+            display_year = current_fiscal_year - 1
+            current_fiscal_year_str = f"{display_year}年"
+            
+            # 現在の会計年度のデータがない場合、予想データを追加
+            if current_fiscal_year_str not in dividend_by_year:
+                try:
+                    # yfinanceから予想配当を取得
+                    info = ticker.info
+                    dividend_rate = info.get('dividendRate')
+                    
+                    if dividend_rate and dividend_rate > 0:
+                        # 予想配当データを作成
+                        dividend_by_year[current_fiscal_year_str] = {
+                            'total': dividend_rate,
+                            'quarters': {},  # 四半期予想は空
+                            'dates': [],
+                            'is_forecast': True  # 予想フラグ
+                        }
+                        print(f"日本株 {symbol} の {display_year}年 予想配当データを追加: ¥{dividend_rate}")
+                except Exception as e:
+                    print(f"予想配当データの追加中にエラー: {e}")
         
         # 結果を配当履歴形式に変換
         dividend_history = []
@@ -2214,16 +2248,15 @@ def get_dividend_history(symbol: str, years: int = None):
             # 発表日（最初の配当支払日を使用）
             announcement_date = min(year_data['dates']) if year_data['dates'] else None
             
-            # 予想/実績の判定（未来の年度は予想とする）
+            # 予想/実績の判定
             current_year = datetime.now().year
             is_forecast = False
             
-            if symbol.endswith('.T'):
-                # 日本株：現在年+1以降は予想
-                fiscal_year_num = int(fiscal_year.replace('年3月期', ''))
-                is_forecast = fiscal_year_num > current_year + 1
+            # 予想フラグが設定されている場合は予想
+            if year_data.get('is_forecast', False):
+                is_forecast = True
             else:
-                # 米国株：現在年以降は予想
+                # 従来のロジック（日本株もアメリカ株も同じ表記になったため統一）
                 fiscal_year_num = int(fiscal_year.replace('年', ''))
                 is_forecast = fiscal_year_num > current_year
             
