@@ -1702,7 +1702,8 @@ def _get_related_stocks(symbol: str, df: pd.DataFrame, limit: int) -> pd.DataFra
 
 def _get_related_stocks_by_dividend_yield(symbol: str, df: pd.DataFrame, limit: int, min_dividend_yield: float) -> pd.DataFrame:
     """
-    利回り率基準で関連銘柄を取得（事前定義された高配当銘柄リストを使用）
+    利回り率基準で関連銘柄を取得（指定利回り率の±0.5%の誤差範囲内の銘柄を返却）
+    事前定義された高配当銘柄リストを使用
     """
     try:
         # 日本株かどうかを判定
@@ -1753,10 +1754,14 @@ def _get_related_stocks_by_dividend_yield(symbol: str, df: pd.DataFrame, limit: 
         if symbol in high_dividend_stocks:
             del high_dividend_stocks[symbol]
         
-        # 指定された利回り率以上の銘柄をフィルタリング
+        # 指定された利回り率の±0.5%の誤差範囲内の銘柄をフィルタリング
         qualifying_stocks = []
+        tolerance = 0.5  # ±0.5%の誤差
+        min_range = min_dividend_yield - tolerance
+        max_range = min_dividend_yield + tolerance
+        
         for stock_symbol, stock_data in high_dividend_stocks.items():
-            if stock_data['yield'] >= min_dividend_yield:
+            if min_range <= stock_data['yield'] <= max_range:
                 qualifying_stocks.append({
                     'Symbol': stock_symbol,
                     'Name': stock_data['name'],

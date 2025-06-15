@@ -24,7 +24,7 @@ def get_related_markets(
     symbol: str,
     limit: int = Query(5, description="返却する結果の最大数"),
     criteria: RelationCriteria = Query(RelationCriteria.INDUSTRY, description="関連付けの基準（industry: 業界, dividend_yield: 利回り率）"),
-    min_dividend_yield: Optional[float] = Query(None, description="最小利回り率（%）- criteria=dividend_yieldの場合に使用"),
+    min_dividend_yield: Optional[float] = Query(None, description="目標利回り率（%）- criteria=dividend_yieldの場合、この値の±0.5%の範囲内の銘柄を返却"),
     market_service=Depends(get_market_service)
 ):
     """
@@ -33,7 +33,7 @@ def get_related_markets(
     - **symbol**: 銘柄シンボル（例: AAPL, 9432.T）
     - **limit**: 返却する結果の最大数
     - **criteria**: 関連付けの基準（industry: 業界, dividend_yield: 利回り率）
-    - **min_dividend_yield**: 最小利回り率（%）- criteria=dividend_yieldの場合に使用
+    - **min_dividend_yield**: 目標利回り率（%）- criteria=dividend_yieldの場合、この値の±0.5%の範囲内の銘柄を返却
     """
     try:
         if criteria == RelationCriteria.DIVIDEND_YIELD and min_dividend_yield is None:
@@ -41,7 +41,7 @@ def get_related_markets(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "error_code": "MISSING_PARAMETER",
-                    "message": "利回り率基準の場合、min_dividend_yieldパラメータが必要です"
+                    "message": "利回り率基準の場合、min_dividend_yieldパラメータ（目標利回り率）が必要です"
                 }
             )
         
