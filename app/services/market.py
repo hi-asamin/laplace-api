@@ -771,7 +771,7 @@ def calculate_dividend_yield(symbol: str, info: dict) -> Optional[str]:
         Optional[str]: 配当利回り（%表記）、配当がない場合はNone
     """
     try:
-        # 1. 最も確実な方法：配当レートと現在価格から計算
+        # 1. 最も確実な方法：配当レートと現在価格から計算（最優先）
         dividend_rate = info.get('dividendRate') or info.get('trailingAnnualDividendRate')
         current_price = (info.get('currentPrice') or 
                         info.get('regularMarketPrice') or 
@@ -779,32 +779,58 @@ def calculate_dividend_yield(symbol: str, info: dict) -> Optional[str]:
         
         if dividend_rate and current_price and current_price > 0:
             dividend_yield = (dividend_rate / current_price) * 100
-            return f"{dividend_yield:.2f}%"
+            # 異常値チェック（50%超は異常値として除外）
+            if dividend_yield > 50:
+                print(f"Warning: Abnormal dividend yield {dividend_yield:.2f}% for {symbol}, using fallback")
+            else:
+                return f"{dividend_yield:.2f}%"
         
-        # 2. trailingAnnualDividendYieldを使用（より信頼性が高い）
-        trailing_yield = info.get('trailingAnnualDividendYield')
-        if trailing_yield and trailing_yield > 0:
-            # trailingAnnualDividendYieldは既にパーセンテージ形式の場合と小数形式の場合がある
-            if trailing_yield < 1:  # 小数形式の場合（0.05 = 5%）
-                dividend_yield = trailing_yield * 100
-            else:  # パーセンテージ形式の場合（5.0 = 5%）
-                dividend_yield = trailing_yield
-            return f"{dividend_yield:.2f}%"
-        
-        # 3. dividendYieldを使用（フォールバック）
+        # 2. yfinanceの配当利回りフィールドを慎重に使用
+        # 注意: yfinanceのdividendYieldフィールドは信頼性が低いため、厳格にチェック
         dividend_yield_value = info.get('dividendYield')
         if dividend_yield_value and dividend_yield_value > 0:
-            # dividendYieldの値の範囲を判定
-            if dividend_yield_value < 1:  # 小数形式の場合（0.05 = 5%）
+            # 異常値の事前チェック
+            if dividend_yield_value > 1:  # 1を超える場合は既にパーセント形式の可能性
+                # 100%を超える配当利回りは現実的でない
+                if dividend_yield_value > 100:
+                    print(f"Warning: Extremely high dividend yield {dividend_yield_value} for {symbol}, skipping")
+                else:
+                    # 既にパーセント形式として扱う
+                    return f"{dividend_yield_value:.2f}%"
+            else:
+                # 小数形式として扱う（0.05 = 5%）
                 dividend_yield = dividend_yield_value * 100
-            else:  # パーセンテージ形式の場合（5.0 = 5%）
-                dividend_yield = dividend_yield_value
-            return f"{dividend_yield:.2f}%"
+                # 再度異常値チェック
+                if dividend_yield > 50:
+                    print(f"Warning: High dividend yield {dividend_yield:.2f}% for {symbol}, may be incorrect")
+                else:
+                    return f"{dividend_yield:.2f}%"
+        
+        # 3. trailingAnnualDividendYieldを使用（より慎重に）
+        trailing_yield = info.get('trailingAnnualDividendYield')
+        if trailing_yield and trailing_yield > 0:
+            # 異常値の事前チェック
+            if trailing_yield > 1:  # 1を超える場合は既にパーセント形式の可能性
+                if trailing_yield > 100:
+                    print(f"Warning: Extremely high trailing dividend yield {trailing_yield} for {symbol}, skipping")
+                else:
+                    return f"{trailing_yield:.2f}%"
+            else:
+                # 小数形式として扱う
+                dividend_yield = trailing_yield * 100
+                if dividend_yield > 50:
+                    print(f"Warning: High trailing dividend yield {dividend_yield:.2f}% for {symbol}, may be incorrect")
+                else:
+                    return f"{dividend_yield:.2f}%"
         
         # 4. ETFや指数の場合、yield情報を取得
         if info.get('yield') and info.get('yield') > 0:
-            yield_value = info.get('yield', 0) * 100
-            return f"{yield_value:.2f}%"
+            yield_value = info.get('yield', 0)
+            # yieldフィールドも同様にチェック
+            if yield_value < 1:
+                yield_value = yield_value * 100
+            if yield_value <= 50:  # 異常値チェック
+                return f"{yield_value:.2f}%"
         
         # 5. S&P500などの指数の場合、過去の平均利回りを推定
         if is_index_symbol(symbol):
@@ -816,7 +842,7 @@ def calculate_dividend_yield(symbol: str, info: dict) -> Optional[str]:
         
         # 6. 配当がない場合は0.00%を返す
         # dividendRateが明示的に0またはNoneの場合
-        if (dividend_rate == 0 or dividend_rate is None) and current_price:
+        if dividend_rate is not None and dividend_rate == 0:
             return "0.00%"
         
         return None
@@ -1260,16 +1286,9 @@ def get_fundamental_data(symbol: str):
                     # 次回支払日は推定（通常は権利落ち日の数週間後）
                     next_payment = ex_date + timedelta(days=30)
             
-            # 配当利回りの処理（yfinanceのdividendYieldは既に小数形式）
-            dividend_yield_value = info.get('dividendYield', 0)
-            if dividend_yield_value > 0:
-                # dividendYieldが1未満の場合は小数形式（0.0372 = 3.72%）
-                if dividend_yield_value < 1:
-                    dividend_yield_formatted = f"{dividend_yield_value * 100:.2f}%"
-                else:
-                    # 既にパーセント形式の場合（稀だが念のため）
-                    dividend_yield_formatted = f"{dividend_yield_value:.2f}%"
-            else:
+            # 配当利回りの処理（修正済みのcalculate_dividend_yield関数を使用）
+            dividend_yield_formatted = calculate_dividend_yield(symbol, info)
+            if not dividend_yield_formatted:
                 dividend_yield_formatted = "0.00%"
             
             dividend_data = {
