@@ -2128,13 +2128,13 @@ def get_company_profile(symbol: str):
             "headquarters": None
         }
 
-def get_dividend_history(symbol: str, years: int = 8):
+def get_dividend_history(symbol: str, years: int = None):
     """
     配当履歴を取得する関数
     
     Args:
         symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
-        years: 取得する年数
+        years: 取得する年数（Noneの場合は取得可能な全履歴を取得）
         
     Returns:
         List[Dict]: 配当履歴データ
@@ -2190,8 +2190,9 @@ def get_dividend_history(symbol: str, years: int = 8):
         # 年度を降順でソート（最新年度が最初）
         sorted_years = sorted(dividend_by_year.keys(), reverse=True)
         
-        # 指定された年数まで取得
-        for fiscal_year in sorted_years[:years]:
+        # 指定された年数まで取得（yearsがNoneの場合は全履歴を取得）
+        years_to_process = sorted_years if years is None else sorted_years[:years]
+        for fiscal_year in years_to_process:
             year_data = dividend_by_year[fiscal_year]
             
             # 四半期配当リストを作成
