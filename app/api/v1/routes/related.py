@@ -1,8 +1,14 @@
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from typing import List, Optional
+from enum import Enum
 
 from app.api.dependencies import get_market_service
 from app.schemas.related import RelatedMarketsResponse
+
+class RelationCriteria(str, Enum):
+    """関連付けの基準"""
+    INDUSTRY = "industry"
+    DIVIDEND_YIELD = "dividend_yield"
 
 router = APIRouter(
     prefix="/related",
@@ -17,6 +23,8 @@ router = APIRouter(
 def get_related_markets(
     symbol: str,
     limit: int = Query(5, description="返却する結果の最大数"),
+    criteria: RelationCriteria = Query(RelationCriteria.INDUSTRY, description="関連付けの基準（industry: 業界, dividend_yield: 利回り率）"),
+    min_dividend_yield: Optional[float] = Query(None, description="最小利回り率（%）- criteria=dividend_yieldの場合に使用"),
     market_service=Depends(get_market_service)
 ):
     """
@@ -24,9 +32,25 @@ def get_related_markets(
     
     - **symbol**: 銘柄シンボル（例: AAPL, 9432.T）
     - **limit**: 返却する結果の最大数
+    - **criteria**: 関連付けの基準（industry: 業界, dividend_yield: 利回り率）
+    - **min_dividend_yield**: 最小利回り率（%）- criteria=dividend_yieldの場合に使用
     """
     try:
-        related_markets = market_service.get_related_markets(symbol, limit)
+        if criteria == RelationCriteria.DIVIDEND_YIELD and min_dividend_yield is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "MISSING_PARAMETER",
+                    "message": "利回り率基準の場合、min_dividend_yieldパラメータが必要です"
+                }
+            )
+        
+        related_markets = market_service.get_related_markets(
+            symbol=symbol, 
+            limit=limit, 
+            criteria=criteria.value,
+            min_dividend_yield=min_dividend_yield
+        )
         return related_markets
     except ValueError as e:
         raise HTTPException(

@@ -8,6 +8,7 @@ class RelatedMarket(BaseModel):
     price: str = Field(..., description="現在の株価")
     change_percent: str = Field(..., description="変化率")
     logo_url: Optional[str] = Field(None, description="ロゴURL")
+    dividend_yield: Optional[str] = Field(None, description="配当利回り")
 
 class RelatedMarketsResponse(BaseModel):
     """関連銘柄のレスポンスモデル"""
