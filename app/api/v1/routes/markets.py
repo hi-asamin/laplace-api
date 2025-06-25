@@ -45,11 +45,22 @@ def search_stocks(
         for result in results:
             try:
                 price_info = market_service.get_stock_price(result["symbol"])
-                result["price"] = price_info["price"]
-                result["change_percent"] = price_info["change_percent"]
+                # 市場に応じて通貨記号を決定
+                is_japan_stock = result["symbol"].endswith(".T")
+                currency_symbol = "¥" if is_japan_stock else "$"
+                
+                # 数値を適切にフォーマット
+                price_value = float(price_info["price"])
+                change_percent_value = float(price_info["change_percent"])
+                
+                result["price"] = f"{currency_symbol}{price_value:.2f}"
+                result["change_percent"] = f"{'+' if change_percent_value > 0 else ''}{change_percent_value:.2f}%"
             except Exception:
-                # 価格取得に失敗した場合はスキップ
-                pass
+                # 価格取得に失敗した場合はデフォルト値を設定
+                is_japan_stock = result["symbol"].endswith(".T")
+                currency_symbol = "¥" if is_japan_stock else "$"
+                result["price"] = f"{currency_symbol}0.00"
+                result["change_percent"] = "0.00%"
         
         return {
             "results": results,
