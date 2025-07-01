@@ -206,6 +206,41 @@ python -m uvicorn app.main:app --reload
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## 開発環境（ホットリロード対応）
+
+コードの変更を即座に反映させながら開発したい場合は、docker-composeを使用してください。
+
+### 1. リポジトリのクローン
+
+```bash
+git clone [リポジトリURL]
+cd laplace-api
+```
+
+### 2. ホットリロード環境の起動
+
+```bash
+# ホットリロード対応のDockerコンテナを起動
+docker-compose up --build
+```
+
+### 3. アプリケーションへのアクセス
+
+アプリケーションは http://localhost:8000 で起動します。
+
+### 4. 開発のポイント
+
+- **ホットリロード**: `app/`ディレクトリ内のPythonファイルを変更すると、自動的にサーバーが再起動されます
+- **即座に反映**: ファイル保存後、数秒で変更が反映されます
+- **API ドキュメント**: http://localhost:8000/docs で確認できます
+
+### 5. 開発環境の停止
+
+```bash
+# コンテナを停止
+docker-compose down
+```
+
 ## Dockerを使った起動方法
 
 ### 1. リポジトリのクローン
