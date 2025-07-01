@@ -15,6 +15,10 @@ from .dynamodb import (
     convert_to_dataframe
 )
 from typing import List, Dict, Any, Optional
+import requests
+from bs4 import BeautifulSoup
+import time
+import logging
 
 TICKER_CACHE = Path(__file__).with_suffix(".csv")
 JPX_DATA_FILE = Path(__file__).parent / "data.csv"  # .xlsから.csvに変更
@@ -170,6 +174,35 @@ JAPAN_TICKERS = [
     {"Symbol": "4755.T", "Name": "楽天グループ", "EnglishName": "Rakuten Group, Inc.", "Market": "Japan"},
     {"Symbol": "9201.T", "Name": "日本航空", "EnglishName": "Japan Airlines Co., Ltd.", "Market": "Japan"},
     {"Symbol": "9202.T", "Name": "ANAホールディングス", "EnglishName": "ANA Holdings Inc.", "Market": "Japan"},
+]
+
+# 日本の主要投資信託データ（実際のファンドコードを使用）
+JAPAN_MUTUAL_FUNDS = [
+    # eMAXIS Slimシリーズ（実際のファンドコード）
+    {"Symbol": "03311179", "Name": "eMAXIS Slim 米国株式 (S&P500)", "EnglishName": "eMAXIS Slim US Equity (S&P500)", "Market": "Japan", "Category": "海外株式", "Company": "三菱UFJ国際投信", "YahooCode": "03311179", "nav": 32850, "change": 188, "change_percent": 0.58},
+    {"Symbol": "0331418A", "Name": "eMAXIS Slim 全世界株式 (オール・カントリー)", "EnglishName": "eMAXIS Slim All World Equity (All Country)", "Market": "Japan", "Category": "海外株式", "Company": "三菱UFJ国際投信", "YahooCode": "0331418A", "nav": 27500, "change": 188, "change_percent": 0.69},
+    {"Symbol": "03312174", "Name": "eMAXIS Slim 先進国株式インデックス", "EnglishName": "eMAXIS Slim Developed Markets Equity Index", "Market": "Japan", "Category": "海外株式", "Company": "三菱UFJ国際投信", "YahooCode": "03312174", "nav": 26890, "change": 145, "change_percent": 0.54},
+    {"Symbol": "03312175", "Name": "eMAXIS Slim 新興国株式インデックス", "EnglishName": "eMAXIS Slim Emerging Markets Equity Index", "Market": "Japan", "Category": "海外株式", "Company": "三菱UFJ国際投信", "YahooCode": "03312175", "nav": 21450, "change": 123, "change_percent": 0.58},
+    {"Symbol": "03312177", "Name": "eMAXIS Slim 国内株式（TOPIX）", "EnglishName": "eMAXIS Slim Japan Equity (TOPIX)", "Market": "Japan", "Category": "国内株式", "Company": "三菱UFJ国際投信", "YahooCode": "03312177", "nav": 17890, "change": 98, "change_percent": 0.55},
+    {"Symbol": "03312176", "Name": "eMAXIS Slim 国内株式（日経平均）", "EnglishName": "eMAXIS Slim Japan Equity (Nikkei 225)", "Market": "Japan", "Category": "国内株式", "Company": "三菱UFJ国際投信", "YahooCode": "03312176", "nav": 19340, "change": 112, "change_percent": 0.58},
+    
+    # SBI・Vシリーズ（実際のファンドコード）
+    {"Symbol": "2020012A", "Name": "SBI・V・S&P500インデックス・ファンド", "EnglishName": "SBI V S&P500 Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "SBIアセットマネジメント", "YahooCode": "2020012A", "nav": 22340, "change": 127, "change_percent": 0.57},
+    {"Symbol": "2020011A", "Name": "SBI・V・全米株式インデックス・ファンド", "EnglishName": "SBI V US Total Stock Market Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "SBIアセットマネジメント", "YahooCode": "2020011A", "nav": 18920, "change": 108, "change_percent": 0.57},
+    {"Symbol": "2020013A", "Name": "SBI・V・全世界株式インデックス・ファンド", "EnglishName": "SBI V Total World Stock Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "SBIアセットマネジメント", "YahooCode": "2020013A", "nav": 19680, "change": 112, "change_percent": 0.57},
+    
+    # 楽天シリーズ（実際のファンドコード）
+    {"Symbol": "01311187", "Name": "楽天・全米株式インデックス・ファンド", "EnglishName": "Rakuten All America Stock Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "楽天投信投資顧問", "YahooCode": "01311187", "nav": 27890, "change": 159, "change_percent": 0.57},
+    {"Symbol": "01311188", "Name": "楽天・全世界株式インデックス・ファンド", "EnglishName": "Rakuten All World Stock Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "楽天投信投資顧問", "YahooCode": "01311188", "nav": 20250, "change": 115, "change_percent": 0.57},
+    
+    # ニッセイシリーズ（実際のファンドコード）
+    {"Symbol": "03131113", "Name": "ニッセイ外国株式インデックスファンド", "EnglishName": "Nissei Foreign Stock Index Fund", "Market": "Japan", "Category": "海外株式", "Company": "ニッセイアセットマネジメント", "YahooCode": "03131113", "nav": 31240, "change": 168, "change_percent": 0.54},
+    {"Symbol": "03131114", "Name": "ニッセイTOPIXインデックスファンド", "EnglishName": "Nissei TOPIX Index Fund", "Market": "Japan", "Category": "国内株式", "Company": "ニッセイアセットマネジメント", "YahooCode": "03131114", "nav": 16780, "change": 89, "change_percent": 0.53},
+    
+    # その他人気ファンド（実際のファンドコード）
+    {"Symbol": "09311173", "Name": "セゾン・バンガード・グローバルバランスファンド", "EnglishName": "Saison Vanguard Global Balanced Fund", "Market": "Japan", "Category": "バランス型", "Company": "セゾン投信", "YahooCode": "09311173", "nav": 18450, "change": 78, "change_percent": 0.42},
+    {"Symbol": "04311140", "Name": "iFree S&P500インデックス", "EnglishName": "iFree S&P500 Index", "Market": "Japan", "Category": "海外株式", "Company": "大和アセットマネジメント", "YahooCode": "04311140", "nav": 24680, "change": 141, "change_percent": 0.57},
+    {"Symbol": "03312181", "Name": "つみたて日本株式（日経平均）", "EnglishName": "Tsumitate Japan Stock (Nikkei 225)", "Market": "Japan", "Category": "国内株式", "Company": "三菱UFJ国際投信", "YahooCode": "03312181", "nav": 17990, "change": 103, "change_percent": 0.58},
 ]
 
 # セクター別銘柄分類（最適化版用）
@@ -359,7 +392,7 @@ def fuzzy_search_lightweight(query: str, limit: int = 10, market: str = None):
                 'symbol': symbol,
                 'name': row['Name'],
                 'score': 100,
-                'asset_type': AssetType.STOCK,
+                'asset_type': get_asset_type(symbol),
                 'market': row['Market'],
                 'logo_url': LOGO_URLS.get(symbol)
             })
@@ -373,7 +406,7 @@ def fuzzy_search_lightweight(query: str, limit: int = 10, market: str = None):
                     'symbol': symbol,
                     'name': row['Name'],
                     'score': 90,
-                    'asset_type': AssetType.STOCK,
+                    'asset_type': get_asset_type(symbol),
                     'market': row['Market'],
                     'logo_url': LOGO_URLS.get(symbol)
                 })
@@ -1140,6 +1173,154 @@ def is_etf_symbol(symbol: str) -> bool:
     
     return False
 
+def is_mutual_fund_symbol(symbol: str) -> bool:
+    """
+    シンボルが投資信託かどうかを判別する関数
+    
+    Args:
+        symbol: 銘柄シンボル
+        
+    Returns:
+        bool: 投資信託の場合True
+    """
+    # 定義済み投資信託シンボル（実際のファンドコード）
+    mutual_fund_symbols = {fund['Symbol'] for fund in JAPAN_MUTUAL_FUNDS}
+    if symbol in mutual_fund_symbols:
+        return True
+    
+    # 日本の投資信託ファンドコードのパターン判定
+    # 8桁の英数字（例：0331418A）
+    if len(symbol) == 8 and symbol.isalnum():
+        return True
+    
+    # 従来の.MFサフィックス（下位互換性のため）
+    if symbol.endswith('.MF'):
+        return True
+        
+    return False
+
+
+
+def get_mutual_fund_details(symbol: str):
+    """
+    投資信託の詳細情報を取得する関数
+    
+    Args:
+        symbol: 投資信託のファンドコード (例: '0331418A')
+        
+    Returns:
+        dict: 投資信託の詳細情報
+    """
+    try:
+        # 投資信託データから情報を取得
+        fund_data = None
+        for fund in JAPAN_MUTUAL_FUNDS:
+            if fund['Symbol'] == symbol:
+                fund_data = fund
+                break
+        
+        if not fund_data:
+            raise ValueError(f"Fund data not found for symbol: {symbol}")
+        
+        # 基本情報の構築
+        market = "Japan"
+        currency = "JPY"
+        currency_symbol = "¥"
+        
+        # リアルタイム基準価額データを取得
+        try:
+            yahoo_code = fund_data.get('YahooCode', symbol)
+            real_time_data = fetch_mutual_fund_real_time_price(yahoo_code)
+            
+            nav_value = real_time_data["nav"]
+            change_value = real_time_data["change"]
+            change_percent_value = real_time_data["change_percent"]
+            last_updated = real_time_data["last_updated"]
+            
+            price_message = f"{currency_symbol}{nav_value:,}"
+            change_message = f"{'+' if change_value > 0 else ''}{currency_symbol}{change_value}"
+            change_percent_message = f"{'+' if change_percent_value > 0 else ''}{change_percent_value:.2f}%"
+            is_positive_change = change_percent_value > 0
+            
+        except Exception as e:
+            print(f"リアルタイムデータ取得失敗、静的データを使用: {e}")
+            # フォールバック: 静的データを使用
+            nav_value = fund_data.get('nav')
+            change_value = fund_data.get('change', 0)
+            change_percent_value = fund_data.get('change_percent', 0)
+            last_updated = "静的データ"
+            
+            if nav_value:
+                price_message = f"{currency_symbol}{nav_value:,}"
+                change_message = f"{'+' if change_value > 0 else ''}{currency_symbol}{change_value}"
+                change_percent_message = f"{'+' if change_percent_value > 0 else ''}{change_percent_value:.2f}%"
+                is_positive_change = change_percent_value > 0
+            else:
+                price_message = "基準価額データなし"
+                change_message = f"{currency_symbol}0"
+                change_percent_message = "0.00%"
+                is_positive_change = True
+                last_updated = "データなし"
+        
+        # 企業プロフィール情報（投資信託の場合は運用会社情報等）
+        company_profile_data = {
+            "company_name": fund_data['Name'],
+            "logo_url": None,
+            "website": None,
+            "market_cap_formatted": None,
+            "business_summary": f"{fund_data['Category']}に投資する投資信託ファンド（運用会社: {fund_data['Company']}）",
+            "industry_tags": [fund_data['Category'], "投資信託"],
+            "full_time_employees": None,
+            "city": None,
+            "state": None,
+            "country": "Japan",
+            "phone": None,
+            "founded_year": None,
+        }
+        
+        # 取引情報（投資信託では利用できない項目が多い）
+        trading_info = {
+            "previous_close": "データなし",
+            "open": "データなし",
+            "day_high": "データなし", 
+            "day_low": "データなし",
+            "volume": "データなし",
+            "avg_volume": "データなし",
+            "market_cap": "データなし",
+            "pe_ratio": None,
+            "primary_exchange": "投資信託"
+        }
+        
+        return {
+            "symbol": symbol,
+            "name": fund_data['Name'],
+            "market": market,
+            "market_name": "投資信託",
+            "price": price_message,
+            "change": change_message,
+            "change_percent": change_percent_message,
+            "is_positive": is_positive_change,
+            "currency": currency,
+            "logo_url": None,
+            "sector": fund_data.get('Category', '投資信託'),
+            "industry": "投資信託",
+            "description": f"{fund_data['EnglishName']} - {fund_data['Company']}が運用する{fund_data['Category']}ファンド",
+            "website": None,
+            "trading_info": trading_info,
+            "dividend_yield": None,
+            "company_profile": company_profile_data,
+            "last_updated": last_updated,
+            "fund_info": {
+                "fund_company": fund_data['Company'],
+                "category": fund_data['Category'],
+                "yahoo_code": fund_data.get('YahooCode', symbol),
+                "note": "基準価額はYahoo Finance Japanからリアルタイム取得。取得失敗時は静的データを表示。"
+            }
+        }
+    except Exception as e:
+        print(f"Error fetching mutual fund details for {symbol}: {e}")
+        raise ValueError(f"Failed to fetch mutual fund details for {symbol}")
+
 def get_asset_type(symbol: str) -> AssetType:
     """
     シンボルからアセットタイプを判定する関数
@@ -1154,6 +1335,8 @@ def get_asset_type(symbol: str) -> AssetType:
         return AssetType.INDEX
     elif is_etf_symbol(symbol):
         return AssetType.ETF
+    elif is_mutual_fund_symbol(symbol):
+        return AssetType.MUTUAL_FUND
     else:
         return AssetType.STOCK
 
@@ -1162,12 +1345,16 @@ def get_market_details(symbol: str):
     銘柄の詳細情報を取得する関数
     
     Args:
-        symbol: 銘柄シンボル (例: 'AAPL', '7203.T')
+        symbol: 銘柄シンボル (例: 'AAPL', '7203.T', '0331418A')
         
     Returns:
         dict: 銘柄の詳細情報
     """
     try:
+        # 投資信託の場合は専用処理
+        if is_mutual_fund_symbol(symbol):
+            return get_mutual_fund_details(symbol)
+        
         # シンボルから市場を判断
         is_japan_stock = symbol.endswith(".T")
         market = "Japan" if is_japan_stock else "US"
@@ -2172,13 +2359,13 @@ def get_static_ticker_data():
     DynamoDBアクセスを避けて高速検索を実現
     """
     # 静的データを結合してDataFrameを作成
-    all_tickers = INITIAL_TICKERS + JAPAN_TICKERS
+    all_tickers = INITIAL_TICKERS + JAPAN_TICKERS + JAPAN_MUTUAL_FUNDS
     df = pd.DataFrame(all_tickers)
     
     # 欠損値処理
     df = df.fillna('')
     
-    print(f"静的銘柄データ読み込み完了：合計 {len(df)} 件（米国: {len(INITIAL_TICKERS)}, 日本: {len(JAPAN_TICKERS)}）")
+    print(f"静的銘柄データ読み込み完了：合計 {len(df)} 件（米国: {len(INITIAL_TICKERS)}, 日本株: {len(JAPAN_TICKERS)}, 投資信託: {len(JAPAN_MUTUAL_FUNDS)}）")
     return df
 
 def format_market_cap(market_cap_value, currency_symbol=""):
@@ -2734,3 +2921,149 @@ def _get_related_indices_optimized(symbol: str, limit: int) -> List[Dict]:
     related_indices = [idx for idx in popular_indices if idx['symbol'] != symbol]
     
     return related_indices[:limit]
+
+def fetch_mutual_fund_real_time_price(yahoo_code: str) -> dict:
+    """
+    Yahoo Finance Japanから投資信託の基準価額をリアルタイムで取得する関数
+    
+    Args:
+        yahoo_code: Yahoo Financeのファンドコード (例: '0331418A')
+        
+    Returns:
+        dict: 基準価額データ（nav, change, change_percent, last_updated）
+    """
+    try:
+        # Yahoo Finance Japan の投資信託ページURL
+        url = f"https://finance.yahoo.co.jp/quote/{yahoo_code}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # リクエスト送信
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        # HTMLをパース
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # 基準価額を取得 (複数のセレクタを試行)
+        price_selectors = [
+            '[data-test="MUTUAL_FUND_PRICE-value"]',
+            '.stoksPrice',
+            '#main .time',
+            '.fw600 span'
+        ]
+        
+        nav_value = None
+        change_value = 0
+        change_percent_value = 0
+        
+        for selector in price_selectors:
+            price_element = soup.select_one(selector)
+            if price_element:
+                price_text = price_element.get_text(strip=True)
+                # 数値部分を抽出（円、カンマを除去）
+                import re
+                price_match = re.search(r'[\d,]+', price_text.replace('円', '').replace(',', ''))
+                if price_match:
+                    nav_value = int(price_match.group())
+                    break
+        
+        # 前日比変動を取得
+        change_selectors = [
+            '[data-test="MUTUAL_FUND_CHANGE-value"]',
+            '.change span',
+            '.stoksChange'
+        ]
+        
+        for selector in change_selectors:
+            change_element = soup.select_one(selector)
+            if change_element:
+                change_text = change_element.get_text(strip=True)
+                # 変動値と変動率を抽出
+                import re
+                # 例: "+115 (+0.57%)" のような形式から抽出
+                change_match = re.search(r'([+\-]?\d+)', change_text)
+                percent_match = re.search(r'([+\-]?\d+\.?\d*)%', change_text)
+                
+                if change_match:
+                    change_value = int(change_match.group())
+                if percent_match:
+                    change_percent_value = float(percent_match.group(1))
+                break
+        
+        # データが取得できた場合
+        if nav_value is not None:
+            return {
+                "nav": nav_value,
+                "change": change_value,
+                "change_percent": change_percent_value,
+                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "source": "Yahoo Finance Japan"
+            }
+        else:
+            raise ValueError("基準価額データが見つかりませんでした")
+            
+    except Exception as e:
+        logging.warning(f"Yahoo Finance Japanからの価格取得に失敗: {yahoo_code}, エラー: {str(e)}")
+        # フォールバック: 静的データを使用
+        for fund in JAPAN_MUTUAL_FUNDS:
+            if fund['Symbol'] == yahoo_code or fund.get('YahooCode') == yahoo_code:
+                return {
+                    "nav": fund.get('nav', 0),
+                    "change": fund.get('change', 0),
+                    "change_percent": fund.get('change_percent', 0),
+                    "last_updated": "静的データ（リアルタイム取得失敗）",
+                    "source": "Static Data"
+                }
+        
+        # ファンドが見つからない場合
+        raise ValueError(f"投資信託データが見つかりません: {yahoo_code}")
+
+def get_mutual_fund_price_data(symbol: str):
+    """
+    投資信託の価格データを取得する関数
+    
+    Args:
+        symbol: 投資信託のファンドコード (例: '0331418A')
+        
+    Returns:
+        dict: 価格データ（price, change_percent）
+    """
+    try:
+        # 投資信託データからYahoo Codeを取得
+        yahoo_code = None
+        for fund in JAPAN_MUTUAL_FUNDS:
+            if fund['Symbol'] == symbol:
+                yahoo_code = fund.get('YahooCode', symbol)
+                break
+        
+        if not yahoo_code:
+            raise ValueError(f"ファンドが見つかりません: {symbol}")
+        
+        # リアルタイム価格を取得
+        price_data = fetch_mutual_fund_real_time_price(yahoo_code)
+        
+        return {
+            "price": price_data["nav"],
+            "change_percent": price_data["change_percent"],
+            "last_updated": price_data["last_updated"]
+        }
+        
+    except Exception as e:
+        print(f"Error fetching mutual fund price for {symbol}: {e}")
+        # フォールバック: 静的データを使用
+        for fund in JAPAN_MUTUAL_FUNDS:
+            if fund['Symbol'] == symbol:
+                nav_value = fund.get('nav')
+                change_percent_value = fund.get('change_percent', 0)
+                
+                if nav_value:
+                    return {
+                        "price": nav_value,
+                        "change_percent": change_percent_value,
+                        "last_updated": "静的データ（フォールバック）"
+                    }
+        
+        raise ValueError(f"Failed to fetch mutual fund price for {symbol}")

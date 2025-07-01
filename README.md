@@ -240,10 +240,10 @@ docker build -t laplace-api .
 
 ```bash
 # コンテナを起動（ポート8000でアクセス可能）
-docker run -p 8000:80 --env-file .env laplace-api
+docker run -p 8000:80 laplace-api
 
 # バックグラウンドで起動する場合
-docker run -d -p 8000:80 --env-file .env --name laplace-api-container laplace-api
+docker run -d -p 8000:80 --name laplace-api-container laplace-api
 ```
 
 ### 5. アプリケーションへのアクセス

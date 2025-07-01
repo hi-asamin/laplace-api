@@ -22,6 +22,7 @@ class AssetType(str, Enum):
     INDEX = "INDEX"  # 指数
     CRYPTO = "CRYPTO"  # 暗号資産
     COMMODITY = "COMMODITY"  # 商品
+    MUTUAL_FUND = "MUTUAL_FUND"  # 投資信託
 
 # yfinanceのperiodパラメータにマッピング
 PERIOD_MAP: Dict[Period, str] = {
