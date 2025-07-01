@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  app:
+    # Dockerfileがあるディレクトリを指定してイメージをビルド
+    build: .
+    # コンテナに名前をつける
+    container_name: laplace-api-container
+    # ポートフォワーディング設定 (ホストの8000番ポートをコンテナの8000番ポートに接続)
+    ports:
+      - "8000:8000"
+    # ボリュームマウント設定 (★これがホットリロードの鍵★)
+    volumes:
+      - ./app:/app/app
+    # コンテナ起動時に実行するコマンド (Uvicornをホットリロードモードで起動)
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"] 
