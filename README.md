@@ -73,6 +73,10 @@ API は安定性と後方互換性を確保するためにバージョニング�
 
 import { API_BASE_URL, APP_VERSION } from "@/config";
 
+// または環境変数から直接取得
+// const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+// const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "1.0.0";
+
 export interface SearchResult {
   symbol: string;
   name: string;
@@ -129,7 +133,7 @@ export const searchStocks = async (query: string): Promise<SearchResponse> => {
 
 - Python 3.12
 - pip（Python パッケージマネージャー）
-- Docker（ローカルの DynamoDB を使用する場合）
+- Docker（コンテナでの実行やローカルの DynamoDB を使用する場合）
 
 ### 1. リポジトリのクローン
 
@@ -202,6 +206,94 @@ python -m uvicorn app.main:app --reload
 - Swagger UI: http://localhost:8000/docs
 - ReDoc: http://localhost:8000/redoc
 
+## Dockerを使った起動方法
+
+### 1. リポジトリのクローン
+
+```bash
+git clone [リポジトリURL]
+cd laplace-api
+```
+
+### 2. 環境変数の設定
+
+`.env`ファイルを作成し、必要な環境変数を設定します：
+
+```env
+# 環境設定
+ENVIRONMENT=development
+
+# AWS設定（必要に応じて）
+AWS_ACCESS_KEY_ID=あなたのアクセスキー
+AWS_SECRET_ACCESS_KEY=あなたのシークレットキー
+AWS_DEFAULT_REGION=ap-northeast-1
+```
+
+### 3. Dockerイメージのビルド
+
+```bash
+# Dockerイメージをビルド
+docker build -t laplace-api .
+```
+
+### 4. Dockerコンテナの起動
+
+```bash
+# コンテナを起動（ポート8000でアクセス可能）
+docker run -p 8000:80 laplace-api
+
+# バックグラウンドで起動する場合
+docker run -d -p 8000:80 --name laplace-api-container laplace-api
+```
+
+### 5. アプリケーションへのアクセス
+
+アプリケーションは http://localhost:8000 で起動します。
+
+### 6. API ドキュメントの確認
+
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### 7. コンテナの管理
+
+```bash
+# コンテナの停止
+docker stop laplace-api-container
+
+# コンテナの削除
+docker rm laplace-api-container
+
+# イメージの削除
+docker rmi laplace-api
+
+# ログの確認
+docker logs laplace-api-container
+
+# コンテナ内に入る（デバッグ用）
+docker exec -it laplace-api-container /bin/bash
+```
+
+### Docker + ローカルDynamoDBの組み合わせ
+
+ローカルDynamoDBと組み合わせて使用する場合：
+
+```bash
+# 1. ローカルDynamoDBを起動
+docker run -d -p 8000:8000 --name dynamodb-local amazon/dynamodb-local
+
+# 2. アプリケーションコンテナを起動（DynamoDBコンテナにリンク）
+docker run -d -p 8001:80 \
+  --link dynamodb-local:dynamodb \
+  --env-file .env \
+  -e USE_LOCAL_DYNAMODB=true \
+  -e DYNAMODB_ENDPOINT_URL=http://dynamodb:8000 \
+  --name laplace-api-container \
+  laplace-api
+```
+
+この場合、アプリケーションは http://localhost:8001 でアクセスできます。
+
 ## トラブルシューティング
 
 ### 一般的な問題
@@ -222,6 +314,22 @@ python -m uvicorn app.main:app --reload --port 8001
 
 - ローカル DynamoDB が起動していることを確認
 - `.env.local`の設定を確認
+
+4. Docker関連の問題
+
+```bash
+# コンテナが起動しない場合
+docker logs laplace-api-container
+
+# ポートが使用されている場合
+docker run -p 8001:80 --env-file .env laplace-api
+
+# イメージのビルドエラー
+docker build --no-cache -t laplace-api .
+
+# コンテナの強制削除
+docker rm -f laplace-api-container
+```
 
 ### 開発時の注意点
 

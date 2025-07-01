@@ -44,22 +44,36 @@ def search_stocks(
         # 価格情報の追加
         for result in results:
             try:
-                price_info = market_service.get_stock_price(result["symbol"])
-                # 市場に応じて通貨記号を決定
-                is_japan_stock = result["symbol"].endswith(".T")
-                currency_symbol = "¥" if is_japan_stock else "$"
+                symbol = result["symbol"]
+                
+                # 投資信託かどうかを判定
+                if market_service.is_mutual_fund_symbol(symbol):
+                    # 投資信託の場合は専用の価格データを使用
+                    price_info = market_service.get_mutual_fund_price_data(symbol)
+                    currency_symbol = "¥"  # 日本の投資信託は常に円建て
+                else:
+                    # 株式の場合は従来通りの処理
+                    price_info = market_service.get_stock_price(symbol)
+                    # 市場に応じて通貨記号を決定
+                    is_japan_stock = symbol.endswith(".T")
+                    currency_symbol = "¥" if is_japan_stock else "$"
                 
                 # 数値を適切にフォーマット
                 price_value = float(price_info["price"])
                 change_percent_value = float(price_info["change_percent"])
                 
-                result["price"] = f"{currency_symbol}{price_value:.2f}"
+                result["price"] = f"{currency_symbol}{price_value:,.0f}" if currency_symbol == "¥" else f"{currency_symbol}{price_value:.2f}"
                 result["change_percent"] = f"{'+' if change_percent_value > 0 else ''}{change_percent_value:.2f}%"
-            except Exception:
+            except Exception as e:
+                print(f"Error getting price for {result['symbol']}: {e}")
                 # 価格取得に失敗した場合はデフォルト値を設定
-                is_japan_stock = result["symbol"].endswith(".T")
-                currency_symbol = "¥" if is_japan_stock else "$"
-                result["price"] = f"{currency_symbol}0.00"
+                symbol = result["symbol"]
+                if market_service.is_mutual_fund_symbol(symbol):
+                    currency_symbol = "¥"
+                else:
+                    is_japan_stock = symbol.endswith(".T")
+                    currency_symbol = "¥" if is_japan_stock else "$"
+                result["price"] = f"{currency_symbol}0"
                 result["change_percent"] = "0.00%"
         
         return {
